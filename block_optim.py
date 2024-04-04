@@ -33,6 +33,7 @@ class BlockOptimizer(Optimizer):
         switch_block_every: int = 10,
         start_block: Optional[int] = None,
         switch_mode: str = "descending",
+        active_modules: List[str] = None,
         verbose: int = 1,
         log_fn = None,
     ):
@@ -45,6 +46,7 @@ class BlockOptimizer(Optimizer):
             switch_block_every (int, optional): The number of optimization steps before switching to the next block. Defaults to 10.
             start_block (Optional[int], optional): The index of the block to start with. Defaults to None.
             switch_mode (str, optional): The mode for switching between different blocks of parameters. Defaults to "descending".
+            active_modules (List[str]): The list of modules that are always active during optimization. Defaults to None.
             verbose (int, optional): The verbosity level for printing information during optimization. Defaults to 1.
             log_fn: A logging function for recording information during optimization. Defaults to None.
         """
@@ -68,6 +70,7 @@ class BlockOptimizer(Optimizer):
         self.current_block_idx = start_block if start_block is not None else (self.block_num - 1 if switch_mode == "descending" else 0)
         self.global_step = 0
         self.base_optimizer = base_optimizer
+        self.active_modules = active_modules
 
         self.param_groups = base_optimizer.param_groups
         self.state_dict = base_optimizer.state_dict # for compatibility of hf Trainer
@@ -209,7 +212,10 @@ class BlockOptimizer(Optimizer):
         if verbose is None:
             verbose = self.verbose
 
-        self.trainable_params = [self.block_prefix_list[self.current_block_idx]]
+        self.trainable_params = self.block_prefix_list[self.current_block_idx]
+        
+        if self.active_modules is not None:
+            self.trainable_params.extend(self.active_modules)
         
         if verbose >= 1:
             print("Parameters with the following prefix will be trainable:", self.trainable_params)
