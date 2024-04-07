@@ -1,15 +1,32 @@
 # BAdam
-The implementation for [BAdam: A Memory Efficient Full Parameter Training Method for Large Language Models](https://arxiv.org/abs/2404.02827).
+The implementation for [BAdam: A Memory Efficient Full Parameter Training Method for Large Language Models](https://arxiv.org/abs/2404.02827). The paper proposes an algorithm named **BAdam**, which finetunes Llama 2-7b on a single RTX-3090 with Adam's update rule and mixed precision training.
+
+The core idea of **BAdam** is to sequentially solve block coordinate sub-problems. From the implementation perspective, the algorithm runs Adam's update on small portition (usually one single transformer layer) of the parameter, thereby requires much less memory in comparison to full parameter Adam finetuning.
+
+## Table of Contents
+- [Environment Setup](#setup)
+- [Usage of BAdam](#how-to-use-badam)
+    - [Partition by Module](#partition-by-module)
+    - [Partition by Parameter Ratio](#partition-by-parameter-ratio)
+- [Paper's Experiment](#how-to-run-the-experiment)
+    - [Llama 2-7b on Alpaca-GPT4](#llama-2-7b-on-alpaca-gpt4)
+    - [RoBERTa-large on superGLUE](#roberta-large-on-superglue)
 
 ## Setup
-It is suggested to keep the following packages updated:
-```
-torch>=2.1.0
-transformers>=4.35.2
+For those who wish to apply **BAdam** to their own project, there is particular environment setup, yet we recommend to keep `torch>=1.10`.
+
+For those who are interested in reproducing the results in paper or playing with the experiments by themselves, please follow the steps below:
+```bash
+# create a new environment
+conda create -n badam python=3.10
+conda activate badam
+pip install -r requirements.txt
 ```
 
-## Quick Start
-To use the **BAdam**, one can simply add one line of code that wraps the original optimizer.
+## Usage of BAdam
+
+### Partition by Module
+To use the **BAdam**, one can simply add one line of code that wraps the original optimizer. First, paste the `block_optim.py` file into your working directory, in which you execute your code (or add its file path to your `$PYTHONPATH`). Then, add the following code snippet below the definition of your optimizer.
 
 ```python
 from block_optim import BlockOptimizer
@@ -59,13 +76,13 @@ optimizer = BlockOptimizer(
 )
 ```
 **Note:**:
-* When setting block partition, you should be careful with the downstream task. Some tasks has randomly initialized layers, such as the SUPERGlue where the `task_dict` and `pooler` layers are randomly initialized. **In this case, make sure to train these layers first, or set it to be trainable through the whole time.** To set modules to be trainable through the training, you can use `active_modules` argument, e.g. set `active_modules=["model.task_dict.", "model.pooler."]` when create the BlockOptimizer. Note that randomly initialized layers are usually the last layer, so updating these layers will not cause large overhead. We suggest to always set the last layer to be trainable when the memory is permitted.
+* When setting block partition, you should be careful with the downstream task. Some tasks has randomly initialized layers, such as the superGLUE where the `task_dict` and `pooler` layers are randomly initialized. **In this case, make sure to train these layers first, or set it to be trainable through the whole time.** To set modules to be trainable through the training, you can use `active_modules` argument, e.g. set `active_modules=["model.task_dict.", "model.pooler."]` when create the BlockOptimizer. Note that randomly initialized layers are usually the last layer, so updating these layers will not cause large overhead. We suggest to always set the last layer to be trainable when the memory is permitted.
 * The parameters that are not included in `block_prefix_list` will be freezed through the whole training procedure.
 * When setting prefix, it is suggested to include a `.` at the end. For example, it is preferred to use `model.layers.1.` instead of `model.layers.1`, as the later one includes the layer 10, 11, ..., 19 as well (since they have the same prefix).
 * Currently, all the experiments are conducted in single GPU. Using this code in distributed training may exhibit unpredictable behaviors. For instance, when using pytorch DDP, the reducer for gradient synchronization are created when initializing the DDP optimizer. When switching to block where the reducer are not created, the block will not be updated as expected. The code for distributed training is under active development.
 
 
-## Partition by parameter ratio
+### Partition by Parameter Ratio
 Instead of partitioning block by the model's parameter, an alternative choice is to train all the parameters simultaneously with fixed ratio. For instance, we can train $5\%$ of every parameter. In this sense, the feature extractor of every layer are jointly trained, which may be preferred in certain scenarios. However, training all parameters together will lose the benefit of time saving of BlockOptimizer, as model has to backward through the whole model.
 
 To do this, one can use the `SparseGradOptimizer`:
@@ -89,3 +106,79 @@ Currently, the `SparseGradOptimizer` only supports the `Adam` update. The reposi
 **Note:**
 * The `mask_mode` indicates how should the trainable parameter distribute across a parameter. `mask_mode=adjacent` indicates that the trainable parameters are adjacent to each other, while `mask_mode=scatter` indicates that trainable parameters are randomly choosed from the weight. For instance, for a $10 \times 10$ matrix, setting `mask_mode=adjacent` will let parameters of the same row be the same block, and `mask_mode=scatter` means randomly choose 10 trainable parameters from the matrix.
 * The gradient and optimizer states are stored in sparse tensor format. The update rule is exactly the same as the  `BlockAdamOptimizer`: run Adam update on current active block for `switch_every` steps, and then switch to next block.
+* Currently, the operation of sparsifing the gradient causes noticable overhead, which inevitably slow down the training. We leave the acceleration as a future work.
+
+## How to Run Paper's Experiment
+
+### Llama 2-7b on Alpaca-GPT4
+Our implementation of finetuning Llama 2 is based on [Llama Factory](https://github.com/hiyouga/LLaMA-Factory). For the experiment of finetuning Llama-2 7b on [Alpaca-GPT4](https://arxiv.org/abs/2304.03277) dataset, first change the working directory to `llama`:
+```bash
+cd llama-alpaca
+```
+Here is a sample command for running the code:
+```bash
+CUDA_VISIBLE_DEVICES=0 python src/train_bash.py \
+    --stage sft \
+    --model_name_or_path alpaca_gpt4_en \
+    --do_train \
+    --dataset alpaca_gpt4_en \
+    --template default \
+    --finetuning_type block \
+    --output_dir ./outputs/tmp \
+    --overwrite_cache \
+    --per_device_train_batch_size 8 \
+    --per_device_eval_batch_size 4 \
+    --gradient_accumulation_steps 15 \
+    --lr_scheduler_type cosine \
+    --logging_steps 1 \
+    --save_steps 1000 \
+    --val_size 500 \
+    --eval_steps 20 \
+    --evaluation_strategy steps \
+    --learning_rate 1e-5 \
+    --num_train_epochs 32 \
+    --overwrite_output_dir \
+    --plot_loss \
+    --switch_block_every 50 \
+    --switch_mode ascending \
+    --start_block 1 \
+    --bf16
+```
+**Notes on arguments:**
+* `--stage`: Currently we only implement the `sft`.
+* `--finetuning_type`: Options: (block, full, lora, sparse)
+* `--switch_mode`: How to order the block update. Options: (ascending, descending, random).
+* `--switch_every`: Switch block frequency.
+
+### RoBERTa-large on superGLUE
+Our implementation for finetuning RoBERTa-large on [superGLUE](https://arxiv.org/abs/1905.00537) is based on [jiant](https://github.com/nyu-mll/jiant). To run the code, go to directory `roberta-superglue` first:
+```bash
+cd roberta-superglue
+```
+Before training the model, download the dataset using the following bash script. Adjust the script to download the required dataset.
+```bash
+EXP_DIR=./content/exp
+
+python jiant/scripts/download_data/runscript.py \
+    download \
+    --tasks copa \
+    --output_path ${EXP_DIR}/tasks
+```
+The finetuning command has the following form:
+```bash
+CUDA_VISIBLE_DEVICES=0 python badam_ft.py \
+    --task_name boolq \
+    --num_train_epochs 32 \
+    --eval_every_steps 100 \
+    --use_block_optim \
+    --switch_every 100 \
+    --switch_mode ascending \
+    --train_batch_size 16 \
+    --train_last_layer \
+    --hf_pretrained_model_name FacebookAI/roberta-large
+```
+
+**Notes on arguments:**
+* `--task_name`: Options: boolq, wic, wsc, rte, multirc, copa
+* `--use_block_optim`: Whether to use BlockOptimizer or not. Remove this argument leads to full parameter Adam update. Change to `--use_sparse_optim`: to use SparseGradOptimizer.
+* `--train_last_layer`: Whether to train the last layer through the finetuning. For the superGLUE task, the last layer is randomly initialized and thereby needs to be trained first or being trainable through the whole training.

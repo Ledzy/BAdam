@@ -195,12 +195,6 @@ class BlockOptimizer(Optimizer):
             if clear_lp_grads:
                 lp_param.grad = None
 
-            # with torch.no_grad():
-            #     grad_norm += torch.norm(hp_param.grad)
-            
-        # if self.log_fn is not None:
-        #     self.log_fn({"grad_norm": grad_norm.item()})
-        
     def update_trainable_params(self, verbose: Optional[int] = None, initialize: bool = False) -> None:
         """
         Update the trainable parameters based on the current block index and the specified verbosity level.
@@ -243,7 +237,7 @@ class BlockOptimizer(Optimizer):
         self.base_optimizer.param_groups[0]["params"] = self.param_idx2hp.values()
 
         # Clean the optimizer state
-        self.base_optimizer.state = dict()
+        self.base_optimizer.state = defaultdict(lambda: {})
 
         if not initialize:
             for group in self.base_optimizer.param_groups:
@@ -505,7 +499,8 @@ class SparseGradOptimizer(Optimizer): #TODO: handle the mixed precision training
                         p.grad = p.grad.add_(1e-9).to_sparse()
                         if len(self.ordered_named_params) < self.param_num:
                             self.ordered_named_params.append((n, p))
-                        continue
+                        self.current_block_index = (self.current_block_index + 1) % self.param_num
+                        break
                     
                     if update_ratio == 1.: # TODO: make a sparse mask
                         p.grad = p.grad.add_(1e-9).to_sparse()

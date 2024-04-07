@@ -1,29 +1,11 @@
-
-# # Welcome to `jiant`
-# This notebook contains an example of fine-tuning a `roberta-base` model on the MRPC task using the simple `jiant` API.
-
-
-# # Install dependencies
-
-# !git clone https://github.com/nyu-mll/jiant.git
-# # This Colab notebook already has its CUDA-runtime compatible versions of torch and torchvision installed
-# !pip install -r jiant/requirements-no-torch.txt
-
-
-# # Imports
-
 import sys
-# sys.path.insert(0, "/content/jiant")
-# sys.path.insert(0, ".")
 sys.path.insert(0, "..")
 
 import os
 import argparse
-
 import jiant.utils.python.io as py_io
 import jiant.proj.simple.runscript as simple_run
 import jiant.scripts.download_data.runscript as downloader
-
 import wandb
 import argparse
 
@@ -119,11 +101,3 @@ args = simple_run.RunConfiguration(
     write_val_preds=True,
 )
 simple_run.run_simple(args)
-
-
-# The simple API `RunConfiguration` object is saved as `simple_run_config.json`. `simple_run_config.json` can be loaded and used as inputs to repeat experiments as follows.
-
-# args = simple_run.RunConfiguration.from_json_path(os.path.join(config.exp_dir, "runs", RUN_NAME, "simple_run_config.json"))
-# simple_run.run_simple(args)
-
-
