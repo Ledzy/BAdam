@@ -1,0 +1,9 @@
+{
+  "task": "mrpc",
+  "paths": {
+    "train": "/home/luoqijun/code/jiant/content/exp/tasks/data/mrpc/train.jsonl",
+    "test": "/home/luoqijun/code/jiant/content/exp/tasks/data/mrpc/test.jsonl",
+    "val": "/home/luoqijun/code/jiant/content/exp/tasks/data/mrpc/val.jsonl"
+  },
+  "name": "mrpc"
+}

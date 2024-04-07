@@ -1,0 +1,9 @@
+{
+  "task": "wsc",
+  "paths": {
+    "train": "/home/luoqijun/code/jiant/content/exp/tasks/data/wsc/train.jsonl",
+    "val": "/home/luoqijun/code/jiant/content/exp/tasks/data/wsc/val.jsonl",
+    "test": "/home/luoqijun/code/jiant/content/exp/tasks/data/wsc/test.jsonl"
+  },
+  "name": "wsc"
+}

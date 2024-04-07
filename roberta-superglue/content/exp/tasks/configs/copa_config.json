@@ -1,0 +1,9 @@
+{
+  "task": "copa",
+  "paths": {
+    "train": "/home/luoqijun/code/jiant/content/exp/tasks/data/copa/train.jsonl",
+    "test": "/home/luoqijun/code/jiant/content/exp/tasks/data/copa/test.jsonl",
+    "val": "/home/luoqijun/code/jiant/content/exp/tasks/data/copa/val.jsonl"
+  },
+  "name": "copa"
+}

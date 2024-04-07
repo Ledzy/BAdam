@@ -1,0 +1,9 @@
+{
+  "task": "boolq",
+  "paths": {
+    "train": "/home/luoqijun/code/jiant/content/exp/tasks/data/boolq/train.jsonl",
+    "test": "/home/luoqijun/code/jiant/content/exp/tasks/data/boolq/test.jsonl",
+    "val": "/home/luoqijun/code/jiant/content/exp/tasks/data/boolq/val.jsonl"
+  },
+  "name": "boolq"
+}

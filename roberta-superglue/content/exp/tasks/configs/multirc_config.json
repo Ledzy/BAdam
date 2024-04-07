@@ -1,0 +1,9 @@
+{
+  "task": "multirc",
+  "paths": {
+    "train": "/home/luoqijun/code/jiant/content/exp/tasks/data/multirc/train.jsonl",
+    "val": "/home/luoqijun/code/jiant/content/exp/tasks/data/multirc/val.jsonl",
+    "test": "/home/luoqijun/code/jiant/content/exp/tasks/data/multirc/test.jsonl"
+  },
+  "name": "multirc"
+}

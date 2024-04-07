@@ -1,0 +1,9 @@
+{
+  "task": "rte",
+  "paths": {
+    "train": "/home/luoqijun/code/jiant/content/exp/tasks/data/rte/train.jsonl",
+    "test": "/home/luoqijun/code/jiant/content/exp/tasks/data/rte/test.jsonl",
+    "val": "/home/luoqijun/code/jiant/content/exp/tasks/data/rte/val.jsonl"
+  },
+  "name": "rte"
+}
