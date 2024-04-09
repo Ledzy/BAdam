@@ -172,8 +172,8 @@ def run_loop(args: RunConfiguration, checkpoint=None):
             )
         elif args.use_sparse_optim:
             assert "sparse" in args.optimizer_type
-            from block_optim import SparseGradOptimizer
-            runner.optimizer_scheduler.optimizer = SparseGradOptimizer(
+            from block_optim import BlockOptimizerRatio
+            runner.optimizer_scheduler.optimizer = BlockOptimizerRatio(
                 param_groups=runner.optimizer_scheduler.optimizer.param_groups,
                 named_parameters_list=list(runner.jiant_model.named_parameters()),
                 switch_every=args.switch_every,

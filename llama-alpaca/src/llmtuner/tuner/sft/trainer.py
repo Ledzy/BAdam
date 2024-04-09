@@ -11,7 +11,7 @@ from llmtuner.hparams import FinetuningArguments
 from llmtuner.tuner.core.trainer import PeftTrainer
 from ..core.utils import set_trainable, set_trainable_block, llama_param_groups
 
-from .block_optim import BlockOptimizer, SparseGradOptimizer
+from .block_optim import BlockOptimizer, BlockOptimizerRatio
 import time
 from types import MethodType
 from functools import wraps
@@ -219,7 +219,7 @@ class Seq2SeqPeftTrainer(PeftTrainer):
         
         if self.finetuning_args.finetuning_type == "sparse":
             print("Using Sparse optimizer")
-            self.optimizer = SparseGradOptimizer(param_groups=optimizer_grouped_parameters,
+            self.optimizer = BlockOptimizerRatio(param_groups=optimizer_grouped_parameters,
                                                 named_parameters_list=list(self.model.named_parameters()),
                                                 switch_every=self.finetuning_args.switch_block_every,
                                                 update_ratio=self.finetuning_args.update_ratio,

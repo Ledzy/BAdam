@@ -14,7 +14,7 @@ class FinetuningArguments:
     )
     update_ratio: Optional[float] = field(
         default=0.1,
-        metadata={"help": "The ratio of the number of parameters to update in each fine-tuning step. Used in SparseGradOptimizer"}
+        metadata={"help": "The ratio of the number of parameters to update in each fine-tuning step. Used in BlockOptimizerRatio"}
     )
     badam_verbose: Optional[int] = field(
         default=1,

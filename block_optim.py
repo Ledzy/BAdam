@@ -257,8 +257,8 @@ class BlockOptimizer(Optimizer):
         elif self.switch_mode == "fixed":
             pass
             
-# In SparseGradOptimizer, each parameter contains a part of trainable weights
-class SparseGradOptimizer(Optimizer): #TODO: handle the mixed precision training
+# In BlockOptimizerRatio, each block contains a part of trainable weights
+class BlockOptimizerRatio(Optimizer): #TODO: handle the mixed precision training
     def __init__(self, param_groups, 
                  named_parameters_list,
                  update_ratio=0.1, 

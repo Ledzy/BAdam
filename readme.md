@@ -13,9 +13,9 @@ The core idea of **BAdam** is to sequentially solve block coordinate sub-problem
     - [RoBERTa-large on superGLUE](#roberta-large-on-superglue)
 
 ## Setup
-For those who wish to apply **BAdam** to their own project, there is particular environment setup, yet we recommend to keep `torch>=1.10`.
+For those who are interested in applying **BAdam** to their own project, there is particular environment setup, yet we recommend to keep `torch>=1.10`.
 
-For those who are interested in reproducing the results in paper or playing with the experiments by themselves, please follow the steps below:
+For those who are interested in reproducing the results in paper, please follow the steps below:
 ```bash
 # create a new environment
 conda create -n badam python=3.10
@@ -26,7 +26,7 @@ pip install -r requirements.txt
 ## Usage of BAdam
 
 ### Partition by Module
-To use the **BAdam**, one can simply add one line of code that wraps the original optimizer. First, paste the `block_optim.py` file into your working directory, in which you execute your code (or add its file path to your `$PYTHONPATH`). Then, add the following code snippet below the definition of your optimizer.
+To use **BAdam**, one can simply add one line of code that wraps the original optimizer. First, paste the `block_optim.py` file into your working directory, in which you execute your code (or add its file path to your `$PYTHONPATH`). Then, add the following code snippet below the definition of your optimizer.
 
 ```python
 from block_optim import BlockOptimizer
@@ -76,21 +76,21 @@ optimizer = BlockOptimizer(
 )
 ```
 **Note:**:
-* When setting block partition, you should be careful with the downstream task. Some tasks has randomly initialized layers, such as the superGLUE where the `task_dict` and `pooler` layers are randomly initialized. **In this case, make sure to train these layers first, or set it to be trainable through the whole time.** To set modules to be trainable through the training, you can use `active_modules` argument, e.g. set `active_modules=["model.task_dict.", "model.pooler."]` when create the BlockOptimizer. Note that randomly initialized layers are usually the last layer, so updating these layers will not cause large overhead. We suggest to always set the last layer to be trainable when the memory is permitted.
+* When setting block partition, one should be careful with the downstream task. Some tasks has randomly initialized layers, such as the superGLUE where the `task_dict` and `pooler` layers are randomly initialized. **In this case, make sure to train these layers first, or set it to be trainable through the whole time.** To set modules to be trainable through the training, you can use `active_modules` argument, e.g. set `active_modules=["model.task_dict.", "model.pooler."]` when create the BlockOptimizer. Note that randomly initialized layers are usually the last layer, so updating these layers will not cause large overhead. We suggest to always set the last layer to be trainable when the memory is permitted.
 * The parameters that are not included in `block_prefix_list` will be freezed through the whole training procedure.
 * When setting prefix, it is suggested to include a `.` at the end. For example, it is preferred to use `model.layers.1.` instead of `model.layers.1`, as the later one includes the layer 10, 11, ..., 19 as well (since they have the same prefix).
-* Currently, all the experiments are conducted in single GPU. Using this code in distributed training may exhibit unpredictable behaviors. For instance, when using pytorch DDP, the reducer for gradient synchronization are created when initializing the DDP optimizer. When switching to block where the reducer are not created, the block will not be updated as expected. The code for distributed training is under active development.
+* Currently, all the experiments are conducted in a single GPU. Using this code in distributed training may exhibit unpredictable behaviors. For instance, when using pytorch DDP, the reducer for gradient synchronization are created when initializing the DDP optimizer. When switching to block where the reducer are not created, the block will **NOT** be updated as expected. The code for distributed training is under active development.
 
 
 ### Partition by Parameter Ratio
-Instead of partitioning block by the model's parameter, an alternative choice is to train all the parameters simultaneously with fixed ratio. For instance, we can train $5\%$ of every parameter. In this sense, the feature extractor of every layer are jointly trained, which may be preferred in certain scenarios. However, training all parameters together will lose the benefit of time saving of BlockOptimizer, as model has to backward through the whole model.
+Instead of partitioning block by the model's parameter, an alternative choice is to train all the parameters simultaneously with fixed ratio. For instance, we can train 5% of every parameter. In this sense, the feature extractor of every layer are jointly trained, which may be preferred in certain scenarios. However, training a block consisting of parameters coming from all the transformer layers loses the benefit of time saving of BlockOptimizer
 
-To do this, one can use the `SparseGradOptimizer`:
+To do this, one can use the `BlockOptimizerRatio`:
 
 ```python
-from block_optim import SparseGradOptimizer
+from block_optim import BlockOptimizerRatio
 
-optimizer = SparseGradOptimizer(
+optimizer = BlockOptimizerRatio(
     param_groups=param_groups, # param_group of torch.Optimizer, the same as the original optimizer
     named_parameters_list=list(self.model.named_parameters()),
     switch_every=100, # switch to the new block every 100 updates
@@ -101,7 +101,7 @@ optimizer = SparseGradOptimizer(
     eps=1e-8, # eps of Adam update
 )
 ```
-Currently, the `SparseGradOptimizer` only supports the `Adam` update. The repository is still under active development.
+Currently, the `BlockOptimizerRatio` only supports the `Adam` update. The repository is still under active development.
 
 **Note:**
 * The `mask_mode` indicates how should the trainable parameter distribute across a parameter. `mask_mode=adjacent` indicates that the trainable parameters are adjacent to each other, while `mask_mode=scatter` indicates that trainable parameters are randomly choosed from the weight. For instance, for a $10 \times 10$ matrix, setting `mask_mode=adjacent` will let parameters of the same row be the same block, and `mask_mode=scatter` means randomly choose 10 trainable parameters from the matrix.
@@ -180,5 +180,5 @@ CUDA_VISIBLE_DEVICES=0 python badam_ft.py \
 
 **Notes on arguments:**
 * `--task_name`: Options: boolq, wic, wsc, rte, multirc, copa
-* `--use_block_optim`: Whether to use BlockOptimizer or not. Remove this argument leads to full parameter Adam update. Change to `--use_sparse_optim`: to use SparseGradOptimizer.
+* `--use_block_optim`: Whether to use BlockOptimizer or not. Remove this argument leads to full parameter Adam update. Change to `--use_sparse_optim`: to use BlockOptimizerRatio.
 * `--train_last_layer`: Whether to train the last layer through the finetuning. For the superGLUE task, the last layer is randomly initialized and thereby needs to be trained first or being trainable through the whole training.

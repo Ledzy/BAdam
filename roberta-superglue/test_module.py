@@ -5,7 +5,7 @@ from modulefinder import ModuleFinder
 #     --task_name boolq \ # options: (boolq, wic, wsc, rte, multirc, copa)
 #     --num_train_epochs 32 \
 #     --eval_every_steps 100 \
-#     --use_block_optim \ # delete this line to use full Adam, or change to `--use_sparse_optim` to use SparseGradOptimizer
+#     --use_block_optim \ # delete this line to use full Adam, or change to `--use_sparse_optim` to use BlockOptimizerRatio
 #     --switch_every 100 \ # switch frequency
 #     --switch_mode ascending \ # options: (ascending, descending, random) valid when `--use_block_optim` is set
 #     --train_batch_size 16 \
