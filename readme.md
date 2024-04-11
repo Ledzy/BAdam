@@ -3,6 +3,9 @@ The implementation for [BAdam: A Memory Efficient Full Parameter Training Method
 
 The core idea of **BAdam** is to sequentially solve block coordinate sub-problems. From the implementation perspective, the algorithm runs Adam's update on small portition (usually one single transformer layer) of the parameter, thereby requires much less memory in comparison to full parameter Adam finetuning.
 
+## Change log
+[24/04/12] Add LoRA module detection. Make BlockOptimizer compatible with lr scheduler.
+
 ## Table of Contents
 - [Environment Setup](#setup)
 - [Usage of BAdam](#how-to-use-badam)

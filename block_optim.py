@@ -6,14 +6,7 @@ from collections import defaultdict
 from typing import List, Optional, Dict
 import time
 import math
-
-llama_block_prefix = [['model.embed_tokens'], ['model.layers.0.'], ['model.layers.1.'], ['model.layers.2.'], ['model.layers.3.'], 
-                      ['model.layers.4.'], ['model.layers.5.'], ['model.layers.6.'], ['model.layers.7.'], ['model.layers.8.'], 
-                      ['model.layers.9.'], ['model.layers.10.'], ['model.layers.11.'], ['model.layers.12.'], ['model.layers.13.'], 
-                      ['model.layers.14.'], ['model.layers.15.'], ['model.layers.16.'], ['model.layers.17.'], ['model.layers.18.'], 
-                      ['model.layers.19.'], ['model.layers.20.'], ['model.layers.21.'], ['model.layers.22.'], ['model.layers.23.'], 
-                      ['model.layers.24.'], ['model.layers.25.'], ['model.layers.26.'], ['model.layers.27.'], ['model.layers.28.'], 
-                      ['model.layers.29.'], ['model.layers.30.'], ['model.layers.31.'], ['lm_head']]
+from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
 
 # Optional [0, 1, 2]. 
     # 0: no print
@@ -33,7 +26,7 @@ class BlockOptimizer(Optimizer):
         switch_block_every: int = 10,
         start_block: Optional[int] = None,
         switch_mode: str = "descending",
-        active_modules: List[str] = None,
+        active_modules: List[str] = [],
         verbose: int = 1,
         log_fn = None,
     ):
@@ -42,7 +35,6 @@ class BlockOptimizer(Optimizer):
             base_optimizer (Optimizer): The base optimizer being wrapped by the BlockOptimizer.
             named_parameters_list: A function that generates the named parameters of the model.
             block_prefix_list (List[List[str]]): The list of blocks of parameters to be updated.
-
             switch_block_every (int, optional): The number of optimization steps before switching to the next block. Defaults to 10.
             start_block (Optional[int], optional): The index of the block to start with. Defaults to None.
             switch_mode (str, optional): The mode for switching between different blocks of parameters. Defaults to "descending".
@@ -50,10 +42,7 @@ class BlockOptimizer(Optimizer):
             verbose (int, optional): The verbosity level for printing information during optimization. Defaults to 1.
             log_fn: A logging function for recording information during optimization. Defaults to None.
         """
-        # TODO: add automaic block_prefix_list inference
-        if block_prefix_list == "llama-7b":
-            block_prefix_list = llama_block_prefix
-        elif block_prefix_list is None:
+        if block_prefix_list is None:
             block_prefix_list = self.infer_param_groups([n for n, _ in named_parameters_list])
 
         assert switch_mode in ["random", "descending", "ascending", "fixed"]
@@ -67,14 +56,31 @@ class BlockOptimizer(Optimizer):
         self.block_prefix_list = block_prefix_list
         self.block_num = len(block_prefix_list)
         self.log_fn = log_fn
-        self.current_block_idx = start_block if start_block is not None else (self.block_num - 1 if switch_mode == "descending" else 0)
         self.global_step = 0
         self.base_optimizer = base_optimizer
         self.active_modules = active_modules
+        self.defaults = base_optimizer.defaults
 
         self.param_groups = base_optimizer.param_groups
         self.state_dict = base_optimizer.state_dict # for compatibility of hf Trainer
+        
+        if start_block is not None:
+            self.current_block_idx = start_block
+        elif switch_mode == "descending":
+            self.current_block_idx = self.block_num - 1
+        elif switch_mode == "ascending":
+            self.current_block_idx = 0
+        elif self.switch_mode == "random":
+            self.block_order = torch.randperm(self.block_num).tolist()
+            print("next block epoch's update order:", self.block_order[::-1])
+            self.current_block_idx = self.block_order.pop()
 
+        # detect if in lora mode or not
+        self.lora_mode = False
+        if any("lora" in n for n, _ in named_parameters_list):
+            self.lora_mode = True
+            orint("Lora mode detected. Will only train the lora parameters.")
+            
         super().__init__(self.param_groups, base_optimizer.defaults)
         
         if BACKWARD_VERBOSE:
@@ -82,10 +88,9 @@ class BlockOptimizer(Optimizer):
             self.ordered_named_params = []
             self.param_num = len(named_parameters_list)
             for n, p in named_parameters_list:
-                # p.register_hook(self.test_hook(n))
                 p.register_post_accumulate_grad_hook(self.test_hook(n))
 
-        self.update_trainable_params(initialize=True)
+        self.update_trainable_params()
 
         if BACKWARD_VERBOSE == 2:
             for name, param in self.named_parameters_list:
@@ -121,18 +126,16 @@ class BlockOptimizer(Optimizer):
         return block_prefix_list
                 
     def test_hook(self, name):
-        """hook used for recording the time of gradient calculation"""
+        """hook used for recording the time of gradient calculation, see comments on BACKWARD_VERBOSE for more details."""
         
         def func(x):
             if self.record_mark:
                 self.backward_start_time = time.time()          
                 self.record_mark = False
                 relative_time = 0.
-                # print("time when the first grad is ready", time.time())
-                # print(f"param: {name:<50} relative time: {relative_time}")
             else:
                 relative_time = time.time() - self.backward_start_time
-            if any(p_name in name for p_name in self.trainable_params):
+            if any(p_name in name for p_name in self.active_param_prefixs):
                 print(f"param: {name:<50} relative time: {relative_time}")
             
             iterator = self.named_parameters_list
@@ -142,7 +145,7 @@ class BlockOptimizer(Optimizer):
                 if p.requires_grad and p.grad is not None:
                     print("parameter name: ", n, "relative time", time.time() - self.backward_start_time)
                     
-                    if (not any(p_name in n for p_name in self.trainable_params)) and \
+                    if (not any(p_name in n for p_name in self.active_param_prefixs)) and \
                         BACKWARD_VERBOSE == 2:
                         p.grad = None
                     
@@ -156,10 +159,16 @@ class BlockOptimizer(Optimizer):
 
     def load_state_dict(self, state_dict: Dict[str, torch.Tensor]) -> None:
         return self.base_optimizer.load_state_dict(state_dict)
+    
+    def _update_lr(self):
+        # Make sure the learning rate of the base_optimizer is consistent with the BlockOptimizer
+        for group in self.base_optimizer.param_groups:
+            group["lr"] = self.param_groups[0]["lr"]
 
     def step(self, *args, **kwargs) -> None:
         self.record_mark = True
 
+        self._update_lr()
         self._grad_to_hp()
         self.base_optimizer.step(*args, **kwargs)
         self._update_param()
@@ -195,61 +204,86 @@ class BlockOptimizer(Optimizer):
             if clear_lp_grads:
                 lp_param.grad = None
 
-    def update_trainable_params(self, verbose: Optional[int] = None, initialize: bool = False) -> None:
+    def update_trainable_params(self, verbose: Optional[int] = None) -> None:
         """
         Update the trainable parameters based on the current block index and the specified verbosity level.
 
         Args:
             verbose (Optional[int], optional): The verbosity level for printing information. Defaults to None.
-            initialize (bool, optional): Whether to initialize the trainable parameters. Defaults to False.
         """
         if verbose is None:
             verbose = self.verbose
 
-        self.trainable_params = self.block_prefix_list[self.current_block_idx]
+        self.active_param_prefixs = self.block_prefix_list[self.current_block_idx] + self.active_modules
         
-        if self.active_modules is not None:
-            self.trainable_params.extend(self.active_modules)
+        # Make sure there are trainable parameters in the current block when using lora
+        while self.lora_mode:
+            active_param_names = [n for n, _ in self.named_parameters_list if any(p in n for p in self.active_param_prefixs)]
+            if all("lora" not in n for n in active_param_names):
+                print(f"In LoRA mode but no lora parameters in the current block with prefix: {self.active_param_prefixs}. Switching to the next block.")
+                self._update_active_block()
+                self.active_param_prefixs = self.block_prefix_list[self.current_block_idx] + self.active_modules
+                continue
+            break
         
         if verbose >= 1:
-            print("Parameters with the following prefix will be trainable:", self.trainable_params)
+            print("Parameters with the following prefix will be trainable:", self.active_param_prefixs)
 
         # Reset parameters to be optimized
         self.param_idx2lp = {}
         self.param_idx2hp = {}
+        
+        active_param_groups = [
+            {
+                "params": [],
+                "weight_decay": self.param_groups[0]['weight_decay'],
+                **self.defaults
+            },
+            {
+                "params": [],
+                "weight_decay": 0.0,
+                **self.defaults
+            },
+        ]
 
-        i = 0
-        for name, param in self.named_parameters_list:
-            if not any(p in name for p in self.trainable_params):
+        for i, (name, param) in enumerate(self.named_parameters_list):
+            if not any(p in name for p in self.active_param_prefixs):
                 param.requires_grad_(False)
                 param.grad = None
             else:
+                if self.lora_mode and "lora" not in name:
+                    continue
                 param.requires_grad_(True)
+                param_hp = param.clone().float().detach().to(param.device)
+                param_hp.requires_grad = True
+                
                 self.param_idx2lp[i] = param
-                self.param_idx2hp[i] = param.clone().float().detach().to(param.device)
-                self.param_idx2hp[i].requires_grad = True
-
-                i += 1
+                self.param_idx2hp[i] = param_hp
+                
+                if "bias" not in name and not isinstance(param, tuple(ALL_LAYERNORM_LAYERS)):
+                    active_param_groups[0]['params'].append(param_hp)
+                else:
+                    active_param_groups[1]['params'].append(param_hp)
+                
                 if verbose >= 2:
                     print(name)
 
-        self.base_optimizer.param_groups = [self.base_optimizer.param_groups[0]] # TODO: align the optimizer's param_groups with the new trainable parameters
-        self.base_optimizer.param_groups[0]["params"] = self.param_idx2hp.values()
-
-        # Clean the optimizer state
-        self.base_optimizer.state = defaultdict(lambda: {})
-
-        if not initialize:
-            for group in self.base_optimizer.param_groups:
-                for p in group["params"]:
-                    self.base_optimizer.state[p] = defaultdict()
-
+        self.base_optimizer.param_groups = active_param_groups
+        
         import gc
         gc.collect()
+        # Clean the optimizer state
+        self.base_optimizer.state = defaultdict(lambda: {})
+        self._update_active_block()
 
+    def _update_active_block(self):
         # Update the trainable block
         if self.switch_mode == "random":
-            self.current_block_idx = random.randint(0, self.block_num - 1)
+            # self.current_block_idx = random.randint(0, self.block_num - 1)
+            if len(self.block_order) == 0:
+                self.block_order = torch.randperm(self.block_num).tolist()
+                print("Next block epoch's update order:", self.block_order[::-1])
+            self.current_block_idx = self.block_order.pop()
         elif self.switch_mode == "ascending":
             self.current_block_idx = (self.current_block_idx + 1) % self.block_num
         elif self.switch_mode == "descending":
@@ -258,7 +292,7 @@ class BlockOptimizer(Optimizer):
             pass
             
 # In BlockOptimizerRatio, each block contains a part of trainable weights
-class BlockOptimizerRatio(Optimizer): #TODO: handle the mixed precision training
+class BlockOptimizerRatio(Optimizer):
     def __init__(self, param_groups, 
                  named_parameters_list,
                  update_ratio=0.1, 
@@ -276,9 +310,7 @@ class BlockOptimizerRatio(Optimizer): #TODO: handle the mixed precision training
                  ):
         self.update_ratio = update_ratio
         self.verbose = verbose
-        # self.base_optimizer = base_optimizer
         self.sparse_hook = self.sparse_update_hook()
-        # self.param_groups = base_optimizer.param_groups
         self.param_groups = param_groups
         self.named_parameters_list = named_parameters_list
         self.sparse_dict = defaultdict(lambda: {})
@@ -368,7 +400,7 @@ class BlockOptimizerRatio(Optimizer): #TODO: handle the mixed precision training
     
     @torch.no_grad()
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Performs a single AdamW optimization step, adjusted for BAdam Optimizer
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
@@ -502,7 +534,7 @@ class BlockOptimizerRatio(Optimizer): #TODO: handle the mixed precision training
                         self.current_block_index = (self.current_block_index + 1) % self.param_num
                         break
                     
-                    if update_ratio == 1.: # TODO: make a sparse mask
+                    if update_ratio == 1.: # TODO: temporary inefficient fix, need to make a sparse mask
                         p.grad = p.grad.add_(1e-9).to_sparse()
                     else:
                         if p.shape in self.mask_dict and self.mask_dict[p.shape] is not None:
