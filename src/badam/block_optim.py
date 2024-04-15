@@ -291,8 +291,21 @@ class BlockOptimizer(Optimizer):
         elif self.switch_mode == "fixed":
             pass
             
-# In BlockOptimizerRatio, each block contains a part of trainable weights
 class BlockOptimizerRatio(Optimizer):
+    """
+    BlockOptimizerRatio is an extension of BlockOptimizer, where each block contains a part of trainable weights
+    Args:
+        param_groups (list): List of parameter groups.
+        named_parameters_list (list): List of named parameters.
+        update_ratio (float, optional): The update ratio for sparsification. Defaults to 0.1.
+        switch_every (int, optional): Number of steps before switching to new parameter groups. Defaults to 100.
+        preserve_threshold (int, optional): Threshold for preserving the whole gradient when parameter is too small. Defaults to 100.
+        param_update_ratios (defaultdict, optional): Dictionary of parameter update ratios for specific parameter heads. Defaults to defaultdict(lambda: None).
+        mask_mode (str, optional): Choices: ("adjacent", "scatter"). "adjacent" mode selects a group of adjacent entries in the matrix, while "scatter" selects random entries in the matrix.
+        keep_mask (bool, optional): Flag to keep the mask. Defaults to True.
+        include_embedding (bool, optional): Flag to include the embedding layer in optimization. Defaults to False.
+    """
+
     def __init__(self, param_groups, 
                  named_parameters_list,
                  update_ratio=0.1, 
@@ -306,8 +319,7 @@ class BlockOptimizerRatio(Optimizer):
                  eps=1e-8,
                  optimizer_defaults=None,
                  keep_mask=True,
-                 include_embedding=True,
-                #  maximize: bool = False
+                 include_embedding=False,
                  ):
         self.update_ratio = update_ratio
         self.verbose = verbose
@@ -364,9 +376,21 @@ class BlockOptimizerRatio(Optimizer):
                     beta2: float,
                     lr: float,
                     maximize: bool):
-        r"""Functional API that performs Sparse Adam algorithm computation.
+        """
+        Functional API that performs Sparse Adam algorithm computation.
 
-        See :class:`~torch.optim.SparseAdam` for details.
+        Args:
+            params (List[Tensor]): List of parameters.
+            grads (List[Tensor]): List of gradients.
+            exp_avgs (List[Tensor]): List of exponential moving average of gradients.
+            exp_avg_sqs (List[Tensor]): List of exponential moving average of squared gradients.
+            state_steps (List[int]): List of steps for each parameter group update.
+            eps (float): Term added to the denominator to improve numerical stability.
+            beta1 (float): Coefficient used for computing running averages of gradient.
+            beta2 (float): Coefficient used for computing running averages of squared gradient.
+            lr (float): Learning rate.
+            maximize (bool): Flag to indicate if maximizing the objective function.
+
         """
         for i, param in enumerate(params):
             grad = grads[i]
@@ -558,6 +582,7 @@ class BlockOptimizerRatio(Optimizer):
                                 mask = self._generate_mask_scatter(p, update_ratio, offset)
                             else:
                                 raise NotImplementedError
+                            # We save the same mask for all the parameters with the same shape, this treats memory for time.
                             if self.keep_mask:
                                 self.mask_dict[p.shape] = mask
                         
