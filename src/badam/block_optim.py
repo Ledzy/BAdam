@@ -3,7 +3,7 @@ import random
 from torch.optim import Optimizer
 from torch import Tensor
 from collections import defaultdict
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Union, Iterable
 import time
 import math
 from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
@@ -79,7 +79,7 @@ class BlockOptimizer(Optimizer):
         self.lora_mode = False
         if any("lora" in n for n, _ in named_parameters_list):
             self.lora_mode = True
-            orint("Lora mode detected. Will only train the lora parameters.")
+            print("Lora mode detected. Will only train the lora parameters.")
             
         super().__init__(self.param_groups, base_optimizer.defaults)
         
@@ -306,6 +306,7 @@ class BlockOptimizerRatio(Optimizer):
                  eps=1e-8,
                  optimizer_defaults=None,
                  keep_mask=True,
+                 include_embedding=True,
                 #  maximize: bool = False
                  ):
         self.update_ratio = update_ratio
@@ -318,9 +319,14 @@ class BlockOptimizerRatio(Optimizer):
         self.preserve_threshold = preserve_threshold
         self.global_step = 0
         self.current_block_index = 0
+        self.embedding_layer = self._get_embedding_layer()
+        self.include_embedding = include_embedding
         
         self.param_num = len(named_parameters_list)
         self.ordered_named_params = []
+        
+        if not include_embedding:
+            self.embedding_layer.requires_grad_(False)
         
         # mask
         self.mask_mode = mask_mode
@@ -340,6 +346,11 @@ class BlockOptimizerRatio(Optimizer):
                     
         defaults = dict(lr=lr, betas=betas, eps=eps) if optimizer_defaults is None else optimizer_defaults
         super().__init__(self.param_groups, defaults)
+
+    def _get_embedding_layer(self):
+        for n, p in self.named_parameters_list:
+            if "embed" in n:
+                return p
     
     def _sparse_adam(self,
                     params: List[Tensor],
@@ -518,10 +529,11 @@ class BlockOptimizerRatio(Optimizer):
             
             for n, p in iterator:
                 
-                # TODO: Need to adjust the update behavior for the embedding layer
                 if p.requires_grad and p.grad is not None:
                     if p.grad.is_sparse:
                         continue
+                    if p is self.embedding_layer and not self.include_embedding:
+                        p.grad = None
                     num_elements = p.numel()
                     offset = self.sparse_dict[p]["offset"]
                     update_ratio = self.sparse_dict[p]["update_ratio"] if "update_ratio" in self.sparse_dict[p] else self.update_ratio
@@ -567,3 +579,79 @@ class BlockOptimizerRatio(Optimizer):
             return x
         
         return func
+    
+# For torch>=2.1, `_foreach_norm` is used when implementing `clip_grad_norm_`, which doesn't support sparse tensor yet.
+# We can temporarily fix this issue by using the older torch version's implementation:
+    # self.accelerator.clip_grad_norm_ = MethodType(clip_grad_norm_for_sparse_tensor, self.accelerator)
+def clip_grad_norm_for_sparse_tensor(self, parameters, max_norm, norm_type=2):
+    """
+    Modification of the accelerator.clip_grad_norm_ to enable gradient clipping for sparse tensor.
+    Used for torch version >= 2.1
+    """
+    from accelerate.utils import DistributedType
+    from torch import inf
+
+    if self.distributed_type == DistributedType.FSDP:
+        self.unscale_gradients()
+        parameters = [p for p in parameters]
+        for model in self._models:
+            if parameters == [p for p in model.parameters()]:
+                return model.clip_grad_norm_(max_norm, norm_type)
+    elif self.distributed_type == DistributedType.DEEPSPEED:
+        # `accelerator.backward(loss)` is doing that automatically. Therefore, its implementation is not needed
+        # We cannot return the gradient norm because DeepSpeed does it.
+        return None
+    self.unscale_gradients()
+    
+    def clip_func_(
+        parameters: Union[torch.Tensor, Iterable[torch.Tensor]], max_norm: float, norm_type: float = 2.0,
+        error_if_nonfinite: bool = False) -> torch.Tensor:
+        r""" torch 1.13 version clip_grad_norm_, works well with sparse tensor.
+        Clips gradient norm of an iterable of parameters.
+
+        The norm is computed over all gradients together, as if they were
+        concatenated into a single vector. Gradients are modified in-place.
+
+        Args:
+            parameters (Iterable[Tensor] or Tensor): an iterable of Tensors or a
+                single Tensor that will have gradients normalized
+            max_norm (float or int): max norm of the gradients
+            norm_type (float or int): type of the used p-norm. Can be ``'inf'`` for
+                infinity norm.
+            error_if_nonfinite (bool): if True, an error is thrown if the total
+                norm of the gradients from :attr:`parameters` is ``nan``,
+                ``inf``, or ``-inf``. Default: False (will switch to True in the future)
+
+        Returns:
+            Total norm of the parameter gradients (viewed as a single vector).
+        """
+        
+        if isinstance(parameters, torch.Tensor):
+            parameters = [parameters]
+        grads = [p.grad for p in parameters if p.grad is not None]
+        max_norm = float(max_norm)
+        norm_type = float(norm_type)
+        if len(grads) == 0:
+            return torch.tensor(0.)
+        device = grads[0].device
+        if norm_type == inf:
+            norms = [g.detach().abs().max().to(device) for g in grads]
+            total_norm = norms[0] if len(norms) == 1 else torch.max(torch.stack(norms))
+        else:
+            total_norm = torch.norm(torch.stack([torch.norm(g.detach(), norm_type).to(device) for g in grads]), norm_type)
+        if error_if_nonfinite and torch.logical_or(total_norm.isnan(), total_norm.isinf()):
+            raise RuntimeError(
+                f'The total norm of order {norm_type} for gradients from '
+                '`parameters` is non-finite, so it cannot be clipped. To disable '
+                'this error and scale the gradients by the non-finite norm anyway, '
+                'set `error_if_nonfinite=False`')
+        clip_coef = max_norm / (total_norm + 1e-6)
+        # Note: multiplying by the clamped coef is redundant when the coef is clamped to 1, but doing so
+        # avoids a `if clip_coef < 1:` conditional which can require a CPU <=> device synchronization
+        # when the gradients do not reside in CPU memory.
+        clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
+        for g in grads:
+            g.detach().mul_(clip_coef_clamped.to(g.device))
+        return total_norm
+    
+    return clip_func_(parameters, max_norm, norm_type=norm_type)
