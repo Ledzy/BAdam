@@ -9,6 +9,13 @@ The implementation for [BAdam: A Memory Efficient Full Parameter Training Method
 <!-- | LoRA    | Data     | Data     | -->
 **Table 1: Comparison of Methods.** $M$ stands for the number of model's parameters in billion. See Table 4 in paper for detailed analysis on memory consumption.
 
+## Change log
+[24/04/16] Our algorithm has been added to [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory). We would like to express our gratitude to their efforts on integrating **BAdam**!
+
+[24/04/15] Package BAdam in Pypi. Remove unnecessary dependencies in `requirements.txt`.
+
+[24/04/12] Add LoRA module detection. Make BlockOptimizer compatible with lr scheduler.
+
 ## Table of Contents
 - [Environment Setup](#setup)
 - [Usage of BAdam](#how-to-use-badam)
@@ -198,8 +205,3 @@ CUDA_VISIBLE_DEVICES=0 python badam_ft.py \
 * `--task_name`: Options: boolq, wic, wsc, rte, multirc, copa
 * `--use_block_optim`: Whether to use BlockOptimizer or not. Remove this argument leads to full parameter Adam update. Change to `--use_sparse_optim`: to use BlockOptimizerRatio.
 * `--train_last_layer`: Whether to train the last layer through the finetuning. For the superGLUE task, the last layer is randomly initialized and thereby needs to be trained first or being trainable through the whole training.
-
-## Change log
-[24/04/15] Package BAdam in Pypi. Remove unnecessary dependencies in `requirements.txt`.
-
-[24/04/12] Add LoRA module detection. Make BlockOptimizer compatible with lr scheduler.
