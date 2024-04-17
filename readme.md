@@ -51,7 +51,7 @@ pip install -r requirements.txt
 To use **BAdam**, one can simply add one line of code that wraps the original optimizer.
 
 ```python
-from block_optim import BlockOptimizer
+from badam import BlockOptimizer
 
 # before training, add this line to wrap the original optimizer
 optimizer = BlockOptimizer(
@@ -110,7 +110,7 @@ Instead of partitioning block by the model's parameter, an alternative choice is
 To do this, one can use the `BlockOptimizerRatio`:
 
 ```python
-from block_optim import BlockOptimizerRatio
+from badam import BlockOptimizerRatio
 
 optimizer = BlockOptimizerRatio(
     param_groups=param_groups, # param_group of torch.Optimizer, the same as the original optimizer
