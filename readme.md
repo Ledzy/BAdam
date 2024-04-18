@@ -1,6 +1,6 @@
 # BAdam
 
-The implementation for [BAdam: A Memory Efficient Full Parameter Training Method for Large Language Models](https://arxiv.org/abs/2404.02827). The paper proposes an algorithm named **BAdam**, which finetunes Llama 2-7b on a single RTX-3090 with Adam's update rule and mixed precision training. The core idea of **BAdam** is to sequentially solve block coordinate sub-problems. From the implementation perspective, the algorithm runs Adam's update on small portition (usually one single transformer layer) of the parameter, thereby requires much less memory in comparison to full parameter Adam finetuning. 
+The implementation for [BAdam: A Memory Efficient Full Parameter Training Method for Large Language Models](https://arxiv.org/abs/2404.02827). The paper proposes an algorithm named **BAdam**, which finetunes Llama 2-7b on a single RTX-3090 with Adam's update rule and mixed precision training. The core idea of **BAdam** is to sequentially solve block coordinate sub-problems. From the implementation perspective, the algorithm runs Adam's update on small portition (usually one single transformer layer) of the parameter, thereby requires much less memory in comparison to full parameter Adam finetuning. **Using BAdam with one line modification of the original code.**
 
 | Method | Minimum Memory | Memory Cost (Llama 2-7b) |
 | -------- | -------- | -------- |
@@ -9,10 +9,11 @@ The implementation for [BAdam: A Memory Efficient Full Parameter Training Method
 <!-- | LoRA    | Data     | Data     | -->
 **Table 1: Comparison of Methods.** $M$ stands for the number of model's parameters in billion. See Table 4 in paper for detailed analysis on memory consumption.
 
+<!-- ![# BAdam](assets/flowchart.png) -->
+<!-- <img src="assets/flowchart.png" width="1000" height="400"> -->
+
 ## Change log
 [24/04/16] Our algorithm has been added to [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory). We would like to express our gratitude to their efforts on integrating **BAdam**!
-
-[24/04/15] Package BAdam in Pypi. Remove unnecessary dependencies in `requirements.txt`.
 
 [24/04/12] Add LoRA module detection. Make BlockOptimizer compatible with lr scheduler.
 
@@ -21,6 +22,7 @@ The implementation for [BAdam: A Memory Efficient Full Parameter Training Method
 - [Usage of BAdam](#how-to-use-badam)
     - [Partition by Module](#partition-by-module)
     - [Partition by Parameter Ratio](#partition-by-parameter-ratio)
+    - [Hyperparameter Suggestion](#hyperparameter-suggestion)
 - [Paper's Experiment](#how-to-run-the-experiment)
     - [Llama 2-7b on Alpaca-GPT4](#llama-2-7b-on-alpaca-gpt4)
     - [RoBERTa-large on superGLUE](#roberta-large-on-superglue)
@@ -48,7 +50,7 @@ pip install -r requirements.txt
 ## Usage of BAdam
 
 ### Partition by Module
-To use **BAdam**, one can simply add one line of code that wraps the original optimizer.
+**BAdam** uses mixed-precision training, make sure that the model is loaded in `float16` precision for memory saving. To use **BAdam**, one can simply add one line of code that wraps the original optimizer.
 
 ```python
 from badam import BlockOptimizer
@@ -126,10 +128,15 @@ optimizer = BlockOptimizerRatio(
 Currently, the `BlockOptimizerRatio` only supports the `Adam` update. The repository is still under active development.
 
 **Note:**
-* The `mask_mode` indicates how should the trainable parameter distribute across a parameter. `mask_mode=adjacent` indicates that the trainable parameters are adjacent to each other, while `mask_mode=scatter` indicates that trainable parameters are randomly choosed from the weight. For instance, for a $10 \times 10$ matrix, setting `mask_mode=adjacent` will let parameters of the same row be the same block, and `mask_mode=scatter` means randomly choose 10 trainable parameters from the matrix.
+* The `mask_mode` indicates how should the trainable parameter distribute across a parameter. `mask_mode=adjacent` indicates that the trainable parameters are adjacent to each other, while `mask_mode=scatter` indicates that trainable parameters are randomly choosed from the weight. For instance, considering optimizing a $10 \times 10$ matrix with `update_ratio=0.1`, setting `mask_mode=adjacent` will let parameters of the same row be the same block, and `mask_mode=scatter` means randomly choose 10 trainable parameters from the matrix.
 * By default, `BlockOptimizerRatio` doesn't update embedding layer, since in principle the embedding vectors of the tokens that are included in the training samples should be updated, while randomly freeze embedding parameters makes the update imbalanced. One can set `include_embedding=True` to include it for experimental purpose.
 * The gradient and optimizer states are stored in sparse tensor format. The update rule is exactly the same as the  `BlockOptimizer`: run Adam update on current active block for `switch_every` steps, and then switch to next block.
 * Currently, the operation of sparsifing the gradient causes noticable overhead, which inevitably slow down the training. We leave the acceleration as a future work.
+
+### Hyperparameter Suggestion
+One notable hyperparameter is `switch_block_every` (the `K` in paper). It determines how many Adam steps we perform on each block before switching to the next one. Ideally, we expect to balance the data usage for each block in every epoch. This gives a natural choice of $\frac{n}{BD}$, where $n$ is the number of data, $B$ is the effective batch size, and $D$ is the number of blocks. Meanwhile, to achieve sufficient decrease for each block subproblem and fully utilize the advantage of mixed precision training for reducing rounding error, the switch frequency should be large enough. **We notice that set** `switch_block_every` = $\max(\frac{n}{BD}, 50)$ **usually yields fast convergence speed on both training loss and validation loss.**
+
+For `BlockOptimizerRatio`, we notice that setting `mask_mode = "adjacent"` usually performs the best; we leave the study of `mask_mode` as a future work. The convergence speed is highly positively related to the `update_ratio`, so we suggest to choose it as high as possible when the memory is permitted. 
 
 ## How to Run Paper's Experiment
 

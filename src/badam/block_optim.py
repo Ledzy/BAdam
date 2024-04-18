@@ -6,6 +6,7 @@ from collections import defaultdict
 from typing import List, Optional, Dict, Union, Iterable
 import time
 import math
+import warnings
 from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
 
 # Optional [0, 1, 2]. 
@@ -80,6 +81,10 @@ class BlockOptimizer(Optimizer):
         if any("lora" in n for n, _ in named_parameters_list):
             self.lora_mode = True
             print("Lora mode detected. Will only train the lora parameters.")
+            
+        if any(isinstance(p, torch.FloatTensor) for _, p in named_parameters_list):
+            warnings.warn("BAdam expect model to be loaded in fp16 precision while detect fp32 weight. \
+                This will cause additional memory usage and lose the benefit of mixed precision training.")
             
         super().__init__(self.param_groups, base_optimizer.defaults)
         
@@ -504,7 +509,7 @@ class BlockOptimizerRatio(Optimizer):
         for group in self.param_groups:
             for p in group["params"]:
                 self.state[p] = defaultdict()
-        print("switch to new parameter groups, set the state dictionary to be zero")
+        # print("switch to new parameter groups, set the state dictionary to be zero")
     
     def _generate_mask_adjacent(self, param, ratio, offset):
         """select a group of adjacent entries in the matrix, starting from the offset. If the end of the matrix is reached, continue from the beginning."""
