@@ -139,9 +139,6 @@ Currently, the `BlockOptimizerRatio` only supports the `Adam` update. The reposi
 ### Hyperparameter Suggestion
 * Choice of the `switch_block_every`. Compared to Adam, our BAdam only introduces _one_ additional hyperparameter, i.e., the `switch_block_every` (the `K` Adam steps in paper). It determines how many Adam steps we perform for each active block before switching to the next one. Fortunately, this hyperparameter can be set **adaptively**. Ideally, we expect to balance the data usage for each block in every epoch. This gives a natural choice of `switch_block_every` = $\frac{n}{BD}$ (rounding to the nearest integer if it is a fractional), where $n$ is the number of training data points, $B$ is the effective batch size, and $D$ is the number of blocks in BAdam. Using such a setting ensures that after one block-epoch, all the training data points are equally distributed to the $D$ blocks for training. Meanwhile, to achieve sufficient decrease for each block coordinate optimization subproblem and fully utilize the advantage of mixed precision training for reducing rounding error, the switch frequency should not be too small. **We notice that set** `switch_block_every`  = $\max(\frac{n}{BD}, 50)$ **usually yields fast convergence speed on both training loss and validation loss.**
 
-* Choice of the learning rate `lr`. This is a hyperprameter that exists in almost all training methods such as Adam and LoRA, not only for BAdam. Based on our experiments, we find that `lr = 1e-6` works well for tuning Llama 3-8B on the Alpaca-GPT4 dataset for one epoch. We find that `lr = 5e-6` works well for tuning Llama 2-7B on the Alpaca-GPT4 dataset for two epochs. Note that there is no general principle for choosing learning rate. Different models and different methods may have different workable learning rates. 
-
-
 
 ## Run Paper Experiment
 
