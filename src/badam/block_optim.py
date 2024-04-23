@@ -28,6 +28,8 @@ class BlockOptimizer(Optimizer):
         start_block: Optional[int] = None,
         switch_mode: str = "descending",
         active_modules: List[str] = [],
+        include_embedding=False,
+        include_lm_head=False,
         verbose: int = 1,
         log_fn = None,
     ):
@@ -44,7 +46,7 @@ class BlockOptimizer(Optimizer):
             log_fn: A logging function for recording information during optimization. Defaults to None.
         """
         if block_prefix_list is None:
-            block_prefix_list = self.infer_param_groups([n for n, _ in named_parameters_list])
+            block_prefix_list = self.infer_param_groups([n for n, _ in named_parameters_list], include_embedding, include_lm_head)
 
         assert switch_mode in ["random", "descending", "ascending", "fixed"]
         assert isinstance(block_prefix_list, list)
@@ -80,7 +82,7 @@ class BlockOptimizer(Optimizer):
         self.lora_mode = False
         if any("lora" in n for n, _ in named_parameters_list):
             self.lora_mode = True
-            print("Lora mode detected. Will only train the lora parameters.")
+            print("LoRA mode detected. Will only train the lora parameters.")
             
         if any(isinstance(p, torch.FloatTensor) for _, p in named_parameters_list):
             warnings.warn("BAdam expect model to be loaded in fp16 precision while detect fp32 weight. \
@@ -100,8 +102,20 @@ class BlockOptimizer(Optimizer):
         if BACKWARD_VERBOSE == 2:
             for name, param in self.named_parameters_list:
                 param.requires_grad_(True)
-                
-    def infer_param_groups(self, param_names):
+    
+    @property
+    def embedding_layer(self):
+        for n, p in self.named_parameters_list:
+            if "embed" in n:
+                return p
+    
+    @property
+    def lm_head_layer(self):
+        for n, p in self.named_parameters_list:
+            if "lm_head" in n:
+                return p
+
+    def infer_param_groups(self, param_names, include_embedding, include_lm_head):
         """automatic inference of the parameter groups based on the parameter names.
         divide groups into:
             * embedding
@@ -111,8 +125,7 @@ class BlockOptimizer(Optimizer):
         import re
         
         block_prefix_list = []
-        non_embed_layer_params = []
-        
+        lm_head_and_other_params = []
         embed_pattern = r'.*embed[^.]*\.'
         layer_pattern = r'.*layers.[^.]*\.'
 
@@ -120,13 +133,15 @@ class BlockOptimizer(Optimizer):
             if any(prefix[0] in name for prefix in block_prefix_list):
                 continue
             
-            prefix = re.findall(embed_pattern + '|' + layer_pattern, name)
-            if prefix:
-                block_prefix_list.append(prefix)
+            if re.findall(layer_pattern, name):
+                block_prefix_list.append(re.findall(layer_pattern, name))
+            elif re.findall(embed_pattern, name) and include_embedding:
+                block_prefix_list.append(re.findall(embed_pattern, name))
             else:
-                non_embed_layer_params.append(name)
+                lm_head_and_other_params.append(name)
         
-        block_prefix_list.append(non_embed_layer_params)
+        if include_lm_head:
+            block_prefix_list.append(lm_head_and_other_params)
         
         return block_prefix_list
                 
@@ -325,6 +340,7 @@ class BlockOptimizerRatio(Optimizer):
                  optimizer_defaults=None,
                  keep_mask=True,
                  include_embedding=False,
+                 include_lm_head=False
                  ):
         self.update_ratio = update_ratio
         self.verbose = verbose
@@ -336,7 +352,6 @@ class BlockOptimizerRatio(Optimizer):
         self.preserve_threshold = preserve_threshold
         self.global_step = 0
         self.current_block_index = 0
-        self.embedding_layer = self._get_embedding_layer()
         self.include_embedding = include_embedding
         
         self.param_num = len(named_parameters_list)
@@ -344,6 +359,8 @@ class BlockOptimizerRatio(Optimizer):
         
         if not include_embedding:
             self.embedding_layer.requires_grad_(False)
+        if not include_lm_head:
+            self.lm_head_layer.requires_grad_(False)
         
         # mask
         self.mask_mode = mask_mode
@@ -364,9 +381,16 @@ class BlockOptimizerRatio(Optimizer):
         defaults = dict(lr=lr, betas=betas, eps=eps) if optimizer_defaults is None else optimizer_defaults
         super().__init__(self.param_groups, defaults)
 
-    def _get_embedding_layer(self):
+    @property
+    def embedding_layer(self):
         for n, p in self.named_parameters_list:
             if "embed" in n:
+                return p
+            
+    @property
+    def lm_head_layer(self):
+        for n, p in self.named_parameters_list:
+            if "lm_head" in n:
                 return p
     
     def _sparse_adam(self,
@@ -509,7 +533,6 @@ class BlockOptimizerRatio(Optimizer):
         for group in self.param_groups:
             for p in group["params"]:
                 self.state[p] = defaultdict()
-        # print("switch to new parameter groups, set the state dictionary to be zero")
     
     def _generate_mask_adjacent(self, param, ratio, offset):
         """select a group of adjacent entries in the matrix, starting from the offset. If the end of the matrix is reached, continue from the beginning."""
@@ -561,8 +584,6 @@ class BlockOptimizerRatio(Optimizer):
                 if p.requires_grad and p.grad is not None:
                     if p.grad.is_sparse:
                         continue
-                    if p is self.embedding_layer and not self.include_embedding:
-                        p.grad = None
                     num_elements = p.numel()
                     offset = self.sparse_dict[p]["offset"]
                     update_ratio = self.sparse_dict[p]["update_ratio"] if "update_ratio" in self.sparse_dict[p] else self.update_ratio

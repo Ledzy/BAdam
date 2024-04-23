@@ -64,17 +64,15 @@ optimizer = BlockOptimizer(
     verbose=2 # information level, will print trainable parameters when setting to 2
 )
 ```
-The above code automatically creates the block list according to `model.named_parameters`. Specifically, it treates the embedding layer as a single block, each transformer layer as a single block, and group all the other parameters as a single block. For instance, for the Llama2-7b, the block partition will be
+The above code automatically creates the block list according to `model.named_parameters`. Specifically, it treates each transformer layer as a single block. For instance, for the Llama2-7b, the block partition will be
 ```
-block 1: model.embed_tokens.
-block 2: model.layers.0.
-block 3: model.layers.1.
+block 1: model.layers.0.
+block 2: model.layers.1.
 ...
-block 33: model.layers.31.
-block 34: lm_head., model_norm.
+block 32: model.layers.31.
 ```
 
-One can also specify their own block list for the block optimizer. This can be achieved by adjusting the`block_prefix_list` argument. For instance, the following code snippet divide each layer into blocks, which helps further reduce the memory cost:
+**By default, the embedding layer and language modeling head is not included in the training blocks**. One can make them as active blocks by setting `include_embedding=True`, `include_lm_head=True`. One can also specify their own block list for the block optimizer. This can be achieved by adjusting the`block_prefix_list` argument. For instance, the following code snippet divide each layer into blocks, which helps further reduce the memory cost:
 
 ```python
 block_prefix_list = []
