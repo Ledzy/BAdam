@@ -9,11 +9,15 @@ The implementation for [BAdam: A Memory Efficient Full Parameter Training Method
 <!-- | LoRA    | Data     | Data     | -->
 **Table 1: Comparison of Methods.** $M$ stands for the number of model's parameters in billion and $D$ is the number of blocks used in **BAdam**. See Table 4 in paper for detailed analysis on memory consumption.
 
+| Method | Llama 3-8b | Llama 2-7b |
+| -------- | -------- | -------- | 
+| Pretrained model | 5.46 | 3.93 |
+| LoRA | 6.41   | 5.05 | 
+|  **BAdam**  | **6.67** | **5.21** |
+<!-- | LoRA    | Data     | Data     | -->
+**Table 2: MT bench score.** The model is instruction finetuned on Alpaca-GPT4 dataset. **BAdam** consistently outperforms LoRA in MT bench under various evaluation models.
+
 One can also apply **BAdam** for larger models with size such as 13B, 22B, 30B, and 70B. The memory consumption can be estimated to be $2M + \frac{16M}{D}$ (GB), plus some additional memory consumption for gradient checkpointed activations and system use like PyTorch's pre-allocation, etc (minor part).
-
-
-<!-- ![# BAdam](assets/flowchart.png) -->
-<!-- <img src="assets/flowchart.png" width="1000" height="400"> -->
 
 ## Change log
 [24/04/16] Our algorithm has been added to [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory). We would like to express our gratitude to their efforts on integrating **BAdam**!
@@ -150,7 +154,7 @@ Here is a sample command for running the code:
 ```bash
 CUDA_VISIBLE_DEVICES=0 python src/train_bash.py \
     --stage sft \
-    --model_name_or_path alpaca_gpt4_en \
+    --model_name_or_path meta-llama/Llama-2-7b \
     --do_train \
     --dataset alpaca_gpt4_en \
     --template default \
@@ -166,7 +170,7 @@ CUDA_VISIBLE_DEVICES=0 python src/train_bash.py \
     --val_size 500 \
     --eval_steps 20 \
     --evaluation_strategy steps \
-    --learning_rate 5e-6 \
+    --learning_rate 1e-6 \
     --num_train_epochs 3 \
     --overwrite_output_dir \
     --plot_loss \
@@ -174,6 +178,8 @@ CUDA_VISIBLE_DEVICES=0 python src/train_bash.py \
     --switch_mode random \
     --bf16
 ```
+To finetune Llama 3-8b, one can set `--model_name_or_path meta-llama/Meta-Llama-3-8B`. The suggested learning rate is `1e-6` for both Llama 2-7b and Llama 3-8b, based on the evaluation result of MT bench.
+
 **Notes on arguments:**
 * `--stage`: Currently we only implement the `sft`.
 * `--finetuning_type`: Options: (block, full, lora, sparse)
