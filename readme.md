@@ -15,7 +15,7 @@ The implementation for [BAdam: A Memory Efficient Full Parameter Training Method
 | LoRA | 6.41   | 5.05 | 
 |  **BAdam**  | **6.67** | **5.21** |
 <!-- | LoRA    | Data     | Data     | -->
-**Table 2: MT bench score.** The model is instruction finetuned on Alpaca-GPT4 dataset. **BAdam** consistently outperforms LoRA in MT bench under various evaluation models.
+**Table 2: MT bench score.** The model is instruction finetuned on Alpaca-GPT4 dataset using a single RTX3090. **BAdam** consistently outperforms LoRA in MT bench under various evaluation models.
 
 One can also apply **BAdam** for larger models with size such as 13B, 22B, 30B, and 70B. The memory consumption can be estimated to be $2M + \frac{16M}{D}$ (GB), plus some additional memory consumption for gradient checkpointed activations and system use like PyTorch's pre-allocation, etc (minor part).
 
@@ -31,7 +31,7 @@ One can also apply **BAdam** for larger models with size such as 13B, 22B, 30B, 
     - [Partition by Parameter Ratio](#partition-by-parameter-ratio)
     - [Hyperparameter Suggestion](#hyperparameter-suggestion)
 - [Run Paper Experiment](#run-paper-experiment)
-    - [Llama 2-7B on Alpaca-GPT4](#llama-2-7b-on-alpaca-gpt4)
+    - [Llama 3-8B and Llama 2-7B on Alpaca-GPT4](#llama-3-8b-and-llama-2-7b-on-alpaca-gpt4)
     - [RoBERTa-large on superGLUE](#roberta-large-on-superglue)
 
 ## Setup
@@ -125,7 +125,7 @@ optimizer = BlockOptimizerRatio(
     switch_every=100, # switch to the new block every 100 updates
     update_ratio=0.1, # ratio of trainable weight for each parameter
     mask_mode = "adjacent", # choices: ["adjacent", "scatter"], see Note below for more explanation
-    lr=5e-6,
+    lr=1e-6,
     betas=(0.9, 0.999), # betas for Adam update
     eps=1e-8, # eps of Adam update
 )
@@ -145,8 +145,8 @@ Currently, the `BlockOptimizerRatio` only supports the `Adam` update. The reposi
 
 ## Run Paper Experiment
 
-### Llama 2-7B on Alpaca-GPT4
-Our implementation of finetuning Llama 2 is based on [Llama Factory](https://github.com/hiyouga/LLaMA-Factory). For the experiment of finetuning Llama-2 7b on [Alpaca-GPT4](https://arxiv.org/abs/2304.03277) dataset, first change the working directory to `llama`:
+### Llama 3-8B and Llama 2-7B on Alpaca-GPT4
+Our implementation of finetuning Llama 3 and Llama 2 is based on [Llama Factory](https://github.com/hiyouga/LLaMA-Factory). For the experiment of finetuning Llama-2 7b on [Alpaca-GPT4](https://arxiv.org/abs/2304.03277) dataset, first change the working directory to `llama`:
 ```bash
 cd llama-alpaca
 ```
@@ -178,17 +178,18 @@ CUDA_VISIBLE_DEVICES=0 python src/train_bash.py \
     --switch_mode random \
     --bf16
 ```
-To finetune Llama 3-8b, one can set `--model_name_or_path meta-llama/Meta-Llama-3-8B`. The suggested learning rate is `1e-6` for both Llama 2-7b and Llama 3-8b, based on the evaluation result of MT bench.
+To finetune Llama 3-8B, one can set `--model_name_or_path meta-llama/Meta-Llama-3-8B`. We use learning rate `1e-6` for both Llama 3-8B and Llama 2-7B. 
+
+One can also use [Llama Factory](https://github.com/hiyouga/LLaMA-Factory) to implement tuning Llama, as our BAdam is added to this factory. 
 
 **Notes on arguments:**
 * `--stage`: Currently we only implement the `sft`.
 * `--finetuning_type`: Options: (block, full, lora, sparse)
 * `--switch_mode`: How to order the block update. Options: (random, ascending, descending).
 * `--switch_block_every`: Switch block frequency; see "Hyperparameter Suggestion" for how to set this hyperparamter.
-* If one use a GPU with 24GB or more memory, one can set `--per_device_train_batch_size 8` and `--gradient_accumulation_steps 2` to accelarate training.
 * The above sample command is different from the hyperparameters settings in paper, while this version is more efficient. We will update our paper later. 
 
-### RoBERTa-large on superGLUE
+### RoBERTa-large on SuperGLUE
 Our implementation for finetuning RoBERTa-large on [superGLUE](https://arxiv.org/abs/1905.00537) is based on [jiant](https://github.com/nyu-mll/jiant). To run the code, go to directory `roberta-superglue` first:
 ```bash
 cd roberta-superglue
