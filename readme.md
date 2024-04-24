@@ -27,7 +27,7 @@ One can also apply **BAdam** for larger models with size such as 13B, 22B, 30B, 
 ## Table of Contents
 - [Environment Setup](#setup)
 - [Usage of BAdam](#usage-of-badam)
-    - [Partition by Transfomer Layers](#partition-by-transfomer-layers)
+    - [Partition by Module](#partition-by-module)
     - [Partition by Parameter Ratio](#partition-by-parameter-ratio)
     - [Hyperparameter Suggestion](#hyperparameter-suggestion)
 - [Run Paper Experiment](#run-paper-experiment)
@@ -56,7 +56,7 @@ pip install -r requirements.txt
 
 ## Usage of BAdam
 
-### Partition by Transfomer Layers
+### Partition by Module
 **BAdam** uses mixed-precision training, make sure that the model is loaded in `float16` precision for memory saving. To use **BAdam**, one can simply add **one line of code** that wraps the original optimizer.
 
 ```python
