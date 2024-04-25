@@ -157,6 +157,7 @@ CUDA_VISIBLE_DEVICES=0 python src/train_bash.py \
     --model_name_or_path meta-llama/Llama-2-7b \
     --do_train \
     --dataset alpaca_gpt4_en \
+    --cutoff_len 1024 \
     --template default \
     --finetuning_type block \
     --output_dir ./outputs/tmp \
