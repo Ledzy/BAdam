@@ -178,7 +178,7 @@ CUDA_VISIBLE_DEVICES=0 python src/train_bash.py \
     --switch_mode random \
     --bf16
 ```
-To finetune Llama 3-8B, one can set `--model_name_or_path meta-llama/Meta-Llama-3-8B`. We use learning rate `1e-6` for both Llama 3-8B and learning rate 1e-5 for Llama 2-7B, respectively. 
+To finetune Llama 3-8B, one can set `--model_name_or_path meta-llama/Meta-Llama-3-8B`. We use learning rate `1e-6` for Llama 3-8B and learning rate 1e-5 for Llama 2-7B, respectively. 
 
 One can also use [Llama Factory](https://github.com/hiyouga/LLaMA-Factory) to implement tuning Llama, as our BAdam is added to this factory. 
 
