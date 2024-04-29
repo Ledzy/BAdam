@@ -159,7 +159,7 @@ CUDA_VISIBLE_DEVICES=0 python src/train_bash.py \
     --dataset alpaca_gpt4_en \
     --template default \
     --finetuning_type block \
-    --output_dir ./outputs/tmp \
+    --output_dir ./outputs/llama2-7b \
     --overwrite_cache \
     --per_device_train_batch_size 2 \
     --per_device_eval_batch_size 2 \
@@ -175,8 +175,7 @@ CUDA_VISIBLE_DEVICES=0 python src/train_bash.py \
     --overwrite_output_dir \
     --plot_loss \
     --switch_block_every 100 \
-    --switch_mode random \
-    --bf16
+    --switch_mode random
 ```
 To finetune Llama 3-8B, one can set `--model_name_or_path meta-llama/Meta-Llama-3-8B`. We use learning rate `1e-6` for both Llama 3-8B and Llama 2-7B. 
 
