@@ -1,10 +1,10 @@
 torch>=2.1.0
-transformers>=4.37.2
-datasets>=2.14.3
+transformers>=4.35.2
+datasets>=2.15.0
 accelerate>=0.27.2
 peft>=0.10.0
-trl>=0.8.1
-gradio>=4.0.0,<=4.21.0
+trl>=0.5.0,<=0.7.2
+gradio>=3.40.1,<=4.21.0
 scipy
 einops
 sentencepiece
