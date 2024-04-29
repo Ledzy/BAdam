@@ -27,7 +27,7 @@ One can also apply **BAdam** for larger models with size such as 13B, 22B, 30B, 
 ## Table of Contents
 - [Environment Setup](#setup)
 - [Usage of BAdam](#usage-of-badam)
-    - [Partition by Transfomer Layers](#partition-by-transfomer-layers)
+    - [Partition by Module](#partition-by-module)
     - [Partition by Parameter Ratio](#partition-by-parameter-ratio)
     - [Hyperparameter Suggestion](#hyperparameter-suggestion)
 - [Run Paper Experiment](#run-paper-experiment)
@@ -56,7 +56,7 @@ pip install -r requirements.txt
 
 ## Usage of BAdam
 
-### Partition by Transfomer Layers
+### Partition by Module
 **BAdam** uses mixed-precision training, make sure that the model is loaded in `float16` precision for memory saving. To use **BAdam**, one can simply add **one line of code** that wraps the original optimizer.
 
 ```python
@@ -177,7 +177,7 @@ CUDA_VISIBLE_DEVICES=0 python src/train_bash.py \
     --switch_block_every 100 \
     --switch_mode random
 ```
-To finetune Llama 3-8B, one can set `--model_name_or_path meta-llama/Meta-Llama-3-8B`. We use learning rate `1e-6` for both Llama 3-8B and Llama 2-7B. 
+To finetune Llama 3-8B, one can set `--model_name_or_path meta-llama/Meta-Llama-3-8B`. We use learning rate `1e-6` for Llama 3-8B and learning rate 1e-5 for Llama 2-7B, respectively. 
 
 One can also use [Llama Factory](https://github.com/hiyouga/LLaMA-Factory) to implement tuning Llama, as our BAdam is added to this factory. 
 
