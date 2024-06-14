@@ -274,6 +274,7 @@ class BlockOptimizer(Optimizer):
     def _reset_ds_optimizer(self, trainable_param_groups):
         ds_optimizer = self.ds_optimizer
         
+        # reset the bookkeeping of ds optimizer
         ds_optimizer.fp16_groups = []
         ds_optimizer.fp16_partitioned_groups = []
         ds_optimizer.fp16_partitioned_groups_flat = []
@@ -283,13 +284,18 @@ class BlockOptimizer(Optimizer):
         ds_optimizer.fp32_partitioned_groups_flat = []
         
         # setup the fp16 groups and partition it
-        self.ds_optimizer._create_fp16_partitions_with_defragmentation(trainable_param_groups)
+        ds_optimizer._create_fp16_partitions_with_defragmentation(trainable_param_groups)
         
         # register necessary hooks for synchronizing gradients
         self._create_reduce_and_remove_grad_hooks(trainable_param_groups)
 
-        # create fp32 flat partition and initialize ipg buffer
-        self.ds_optimizer._setup_for_real_optimizer()
+        # create fp32 flat partition, initialize ipg buffer and grad partition buffer
+        ds_optimizer._setup_for_real_optimizer()
+        
+        # invalidate the trace cache, since the module processing order has been changed
+        ds_optimizer.parameter_offload.get_param_coordinator(training=True)._invalidate_trace()
+        
+        torch.cuda.empty_cache()
 
     def _create_reduce_and_remove_grad_hooks(self, trainable_param_groups):
         assert hasattr(self, "ds_optimizer"), "The optimizer doesn't have reference to its parent deepspeed optimizer yet. Set optimizer.ds_optimizer = optimizer after deepspeed.initiallize(..., optimizer=optimizer, ...)."
@@ -445,7 +451,10 @@ class BlockOptimizer(Optimizer):
                     trainable_param_groups[0]['params'].append(param)
                 else:
                     trainable_param_groups[1]['params'].append(param)
-                
+
+        # remove the empty param groups
+        trainable_param_groups[:] = [pg for pg in trainable_param_groups if len(pg["params"]) != 0]
+
         self.param_groups = trainable_param_groups
         self.base_optimizer.param_groups = trainable_param_groups
         
