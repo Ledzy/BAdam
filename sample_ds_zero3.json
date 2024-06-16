@@ -1,0 +1,32 @@
+{
+    "train_batch_size": 32,
+    "train_micro_batch_size_per_gpu": 16,
+    "steps_per_print": 2000,
+    "fp16": {
+        "enabled": false
+    },
+    "zero_optimization": {
+        "stage": 3,
+        "allgather_partitions": true,
+        "allgather_bucket_size": 2e8,
+        "overlap_comm": true,
+        "reduce_scatter": true,
+        "reduce_bucket_size": 2e8,
+        "contiguous_gradients": true,
+        "cpu_offload": false
+    },
+    "activation_checkpointing": {
+        "partition_activations": true,
+        "cpu_checkpointing": true,
+        "number_checkpoints": 4,
+        "synchronize_checkpoint_boundary": false,
+        "contiguous_memory_optimization": false
+    },
+    "zero_allow_untested_optimizer": true,
+    "gradient_accumulation_steps": 1,
+    "wall_clock_breakdown": false,
+    "local_rank": 0,
+    "deepseed_config": {
+        "zero_optimization_stage": 3
+    }
+}

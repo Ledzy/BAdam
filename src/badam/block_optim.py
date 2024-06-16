@@ -232,6 +232,8 @@ class BlockOptimizer(Optimizer):
         2. DeepSpeedZeroOptimizer_Stage3._reassign_or_swap_out_partitioned_parameters()
           * copy hp param to lp
           * repartition the params across different GPUs
+          
+        In other words, deepspeed has handled the mixed-precision training, so only ordinary step is needed
         """
 
         self.record_mark = True

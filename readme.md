@@ -7,7 +7,7 @@ The implementation for [BAdam: A Memory Efficient Full Parameter Training Method
 | Adam    | $18M$     | 144 GB+ | 122.8 GB+     |
 | **BAdam**    | $2M + \frac{16M}{D}$   | 23.5 GB|  21.8 GB     |
 <!-- | LoRA    | Data     | Data     | -->
-**Table 1: Comparison of Methods.** $M$ stands for the number of model's parameters in billion and $D$ is the number of blocks used in **BAdam**. See Table 4 in paper for detailed analysis on memory consumption.
+**Table 1: Comparison of Methods.** $M$ stands for the number of model's parameters in billion and $D$ is the number of blocks used in **BAdam**. See Table 2 in paper for detailed analysis on memory consumption.
 
 | Method | Llama 3-8b | Llama 2-7b |
 | -------- | -------- | -------- | 
@@ -20,6 +20,8 @@ The implementation for [BAdam: A Memory Efficient Full Parameter Training Method
 One can also apply **BAdam** for larger models with size such as 13B, 22B, 30B, and 70B. The memory consumption can be estimated to be $2M + \frac{16M}{D}$ (GB), plus some additional memory consumption for gradient checkpointed activations and system use like PyTorch's pre-allocation, etc (minor part).
 
 ## Change log
+[24/06/16] We support model parallel using Deepspeed ZeRO-3 now!
+
 [24/04/16] Our algorithm has been added to [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory). We would like to express our gratitude to their efforts on integrating **BAdam**!
 
 [24/04/12] Add LoRA module detection. Make BlockOptimizer compatible with lr scheduler.
@@ -27,7 +29,8 @@ One can also apply **BAdam** for larger models with size such as 13B, 22B, 30B, 
 ## Table of Contents
 - [Environment Setup](#setup)
 - [Usage of BAdam](#usage-of-badam)
-    - [Partition by Module](#partition-by-module)
+    - [Partition by Module (single GPU)](#partition-by-module-single-gpu)
+    - [Partition by Module (Model parallel)](#partition-by-module-model-parallel)
     - [Partition by Parameter Ratio](#partition-by-parameter-ratio)
     - [Hyperparameter Suggestion](#hyperparameter-suggestion)
 - [Run Paper Experiment](#run-paper-experiment)
@@ -56,7 +59,7 @@ pip install -r requirements.txt
 
 ## Usage of BAdam
 
-### Partition by Module
+### Partition by Module (Single GPU)
 **BAdam** uses mixed-precision training, make sure that the model is loaded in `float16` precision for memory saving. To use **BAdam**, one can simply add **one line of code** that wraps the original optimizer.
 
 ```python
@@ -83,7 +86,7 @@ block 32: model.layers.31.
 
 ```python
 block_prefix_list = []
-for i in range(31):
+for i in range(32):
     layer_prefix = [
         [f"model.layers.{i}.self_attn.q_proj."],
         [f"model.layers.{i}.self_attn.k_proj."],
@@ -108,7 +111,49 @@ optimizer = BlockOptimizer(
 * When setting block partition, one should be careful with the downstream task. Some tasks has randomly initialized classification layers, such as the SuperGLUE where the `task_dict` and `pooler` layers are _randomly initialized_. **In this case, make sure to train these layers first, or set it to be trainable through the whole time.** To set modules to be trainable through the whole training process, one can use `active_modules` argument, e.g., set `active_modules=["model.task_dict.", "model.pooler."]` when create the BlockOptimizer. Note that randomly initialized layers are usually the last layer, so updating these layers will only introduce negligible additional BP time. We thus suggest to always set the last classification layer to be trainable when the memory is permitted, if it is randomly initialized.
 * The parameters that are not included in `block_prefix_list` will be inactive (freezed) through the whole training procedure.
 * When setting prefix, it is suggested to include a `.` at the end. For example, it is preferred to use `model.layers.1.` instead of `model.layers.1`, as the later one includes the layer 10, 11, ..., 19 as well (since they have the same prefix).
-* Currently, all the experiments are conducted using a single 3090 GPU. Using this code in distributed training may exhibit unpredictable behaviors. For instance, when using pytorch DDP, the reducer for gradient synchronization are created when initializing the DDP optimizer. When switching to block where the reducer are not created, the block will **NOT** be updated as expected. The code version for distributed training is currently under active development.
+
+### Partition by Module (Model parallel)
+We support the model parallel offered by deepspeed ZeRO-3. It partitions the model, gradient, and optimizer states across different GPUs so that one can train large models that cannot be fit into a single GPU.  The per GPU memory cost can be estimated by $\frac{2M + 16M/D}{N}$ (GB), plus the additional cost for communication buffer and temporary parameter gathering buffer arised during forward/backward. These buffer sizes can be configurated manually and determines the efficieny of the communication system.
+
+To use ZeRO-3, one needs to set `ds_zero3_enabled=True` when initializing the BlockOptimizer. Then, set `block_optimizer.ds_optimizer = ds_optimizer` after calling `deepspeed.initialize`. An example is given below:
+
+```python
+from badam import BlockOptimizer
+
+optimizer = BlockOptimizer(
+    base_optimizer=original_optimizer,
+    named_parameters_list=list(model.named_parameters()), 
+    switch_block_every=100,
+    switch_mode="random",
+    ds_zero3_enabled=True # set it to True
+)
+
+model, ds_optimizer = deepspeed.initialize(model=model, optimizer=optimizer, ...other arguments)
+
+# create the reference to the ds_optimizer, for the purpose of setup ZeRO-3's environment
+optimizer.ds_optimizer = ds_optimizer
+```
+See `sample_ds_zero3.json` for a sample deepspeed configuration file.
+
+When using huggingface Trainer, one can create the reference to the ds_optimizer by inheriting the Trainer class and rewrite its `training_step` function:
+```python
+def training_step(self, *args, **kwargs):
+    """ Update the reference to deepspeed optimizer """
+    # Replace `self.finetuning_args.use_badam` with your flag variable.
+    if self.finetuning_args.use_badam and \
+        self.args.deepspeed_plugin is not None and \
+        self.args.deepspeed_plugin.zero_stage == 3:
+        
+        ds_optim = self.optimizer.optimizer
+        badam_optim = ds_optim.optimizer
+        badam_optim.ds_optimizer = ds_optim
+    
+    return super().training_step(*args, **kwargs)
+```
+
+The model parallelism results in noticable overhead due to the communication cost. In particular, we empirically observe about 3 times overhead when training Llama 3-8B with 4 RTX-3090 GPUs (without NVLink) using ZeRO-3, in comparison with using single GPU, under the same `per_device_batch_size`. One may use larger batch size to accelerate the training process as ZeRO-3 greatly reduces the per GPU memory cost.
+
+Make sure to use `accelerate config` to configurate the distributed training and then use proper command to launch your script in a distributed way, such as `accelerate launch` and `deepspeed`.
 
 
 ### Partition by Parameter Ratio
@@ -146,7 +191,7 @@ Currently, the `BlockOptimizerRatio` only supports the `Adam` update. The reposi
 ## Run Paper Experiment
 
 ### Llama 3-8B and Llama 2-7B on Alpaca-GPT4
-Our implementation of finetuning Llama 3 and Llama 2 is based on [Llama Factory](https://github.com/hiyouga/LLaMA-Factory). For the experiment of finetuning Llama-2 7b on [Alpaca-GPT4](https://arxiv.org/abs/2304.03277) dataset, first change the working directory to `llama`:
+Our implementation of finetuning Llama 3 and Llama 2 is based on [Llama Factory](https://github.com/hiyouga/LLaMA-Factory). This repository mainly serves as the purpose for reproducing our paper's results. For better support on advanced algorithmic features, we suggest to use the latest version of Llama Factory. For the experiment of finetuning Llama-2 7b on [Alpaca-GPT4](https://arxiv.org/abs/2304.03277) dataset, change the working directory to `llama`:
 ```bash
 cd llama-alpaca
 ```
@@ -178,8 +223,6 @@ CUDA_VISIBLE_DEVICES=0 python src/train_bash.py \
     --switch_mode random
 ```
 To finetune Llama 3-8B, one can set `--model_name_or_path meta-llama/Meta-Llama-3-8B`. We use learning rate `1e-6` for Llama 3-8B and learning rate 1e-5 for Llama 2-7B, respectively. 
-
-One can also use [Llama Factory](https://github.com/hiyouga/LLaMA-Factory) to implement tuning Llama, as our BAdam is added to this factory. 
 
 **Notes on arguments:**
 * `--stage`: Currently we only implement the `sft`.
