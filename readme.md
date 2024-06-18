@@ -82,6 +82,7 @@ block 32: model.layers.31.
 **By default, the embedding layer and language modeling head is not included in the training blocks**. One can add them as two additional blocks by setting `include_embedding=True`, `include_lm_head=True`. 
 
 <details><summary>Click to see more partition strategies and example code</summary>
+
 One can also specify their own block list for the block optimizer. This can be achieved by adjusting the`block_prefix_list` argument. For instance, the following code snippets creat block partitions by self_attn and mlp modules (i.e., $D=32\times 2 = 64$ for Llama 3-8B) and matrix modules (i.e., $D = 32\times 7=224$ for Llama 3-8B), respectively, which helps further reduce the memory cost:
 
 ```python
