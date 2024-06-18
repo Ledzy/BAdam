@@ -148,10 +148,7 @@ To use ZeRO-3, one needs to set `ds_zero3_enabled=True` when initializing the Bl
 from badam import BlockOptimizer
 
 optimizer = BlockOptimizer(
-    base_optimizer=original_optimizer,
-    named_parameters_list=list(model.named_parameters()), 
-    switch_block_every=100,
-    switch_mode="random",
+    ...,
     ds_zero3_enabled=True # set it to True
 )
 
@@ -160,16 +157,15 @@ model, ds_optimizer = deepspeed.initialize(model=model, optimizer=optimizer, ...
 # create the reference to the ds_optimizer, for the purpose of setup ZeRO-3's environment
 optimizer.ds_optimizer = ds_optimizer
 ```
-See `sample_ds_zero3.json` for a sample deepspeed configuration file.
 
-To create the reference to the ds_optimizer when using huggingface Trainer, one can add the BAdamZeRO3Callback when initializing the Trainer:
+When using huggingface Trainer to control the workflow, accessing ds_optimizer is not direct. One can add the BAdamZeRO3Callback to create the reference to ds_optimizer:
 
 ```python
 from badam.utils import BAdamZeRO3Callback
 
-callbacks = original_callbacks.append(BAdamZeRO3Callback) # extend the callback
+callbacks = original_callbacks.append(BAdamZeRO3Callback) # add the callback
 trainer = YourTrainerClass(
-    ...
+    ...,
     callbacks=callbacks
 )
 ```
