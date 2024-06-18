@@ -17,7 +17,7 @@ The implementation for [BAdam: A Memory Efficient Full Parameter Optimization Me
 <!-- | LoRA    | Data     | Data     | -->
 **Table 2: MT bench score.** The model is instruction finetuned on Alpaca-GPT4 dataset using a single RTX3090. **BAdam** consistently outperforms LoRA in MT bench under various evaluation models.
 
-One can also apply **BAdam** for larger models with size such as 13B, 22B, 30B, and 70B. The memory consumption can be estimated to be $2M + \frac{16M}{D}$ (GB), plus some additional memory consumption for gradient checkpointed activations and system use like PyTorch's pre-allocation, etc (minor part).
+One can also apply **BAdam** for larger models with size such as 13B, 22B, 30B, and 70B. The memory consumption can be estimated to be $2M + \frac{16M}{D}$ (GB), plus some additional memory consumption for gradient checkpointed activations and system use like PyTorch's pre-allocation, etc (minor part). When using model parallelism with $N$ GPUs, the memory cost can be estimated by $\frac{2M + 16M/D}{N}$ (GB), plus the additional communication buffers.
 
 ## Change log
 [24/06/16] We support model parallel using Deepspeed ZeRO-3 now!
@@ -34,8 +34,6 @@ One can also apply **BAdam** for larger models with size such as 13B, 22B, 30B, 
     - [Partition by Parameter Ratio](#partition-by-parameter-ratio)
     - [Hyperparameter Suggestion](#hyperparameter-suggestion)
 - [Run Paper Experiment](#run-paper-experiment)
-    - [Llama 3-8B and Llama 2-7B on Alpaca-GPT4](#llama-3-8b-and-llama-2-7b-on-alpaca-gpt4)
-    - [RoBERTa-large on superGLUE](#roberta-large-on-superglue)
 
 ## Setup
 To install **BAdam** from Pypi, one can run:
@@ -60,7 +58,7 @@ pip install -r requirements.txt
 ## Usage of BAdam
 
 ### Partition by Module (A Single GPU)
-**BAdam** uses mixed-precision training, make sure that the model is loaded in `float16` precision for memory saving. To use **BAdam**, one can simply add **one line of code** that wraps the original optimizer.
+**BAdam** uses mixed-precision training, make sure that the model is loaded in `float16` precision for memory saving. One can simply add **one line of code** that wraps the original optimizer to use **BAdam**.
 
 ```python
 from badam import BlockOptimizer
@@ -81,11 +79,10 @@ block 2: model.layers.1.
 ...
 block 32: model.layers.31.
 ```
-
 **By default, the embedding layer and language modeling head is not included in the training blocks**. One can add them as two additional blocks by setting `include_embedding=True`, `include_lm_head=True`. 
 
+<details><summary>Click to see more partition strategies and example code</summary>
 One can also specify their own block list for the block optimizer. This can be achieved by adjusting the`block_prefix_list` argument. For instance, the following code snippets creat block partitions by self_attn and mlp modules (i.e., $D=32\times 2 = 64$ for Llama 3-8B) and matrix modules (i.e., $D = 32\times 7=224$ for Llama 3-8B), respectively, which helps further reduce the memory cost:
-
 
 ```python
 #block partition by self_attn and mlp modules
@@ -131,8 +128,9 @@ optimizer = BlockOptimizer(
     block_prefix_list=block_prefix_list # set the block list
 )
 ```
-
 We have tested that block partition by self_attn and mlp modules achieves a MT-bench score 6.65 for finetuning Llama 3-8B. This score matches that (6.67) achieved by block partition by transformer layer modules, while further reduces the memory cost. 
+
+</details>
 
 **Important Notes:**
 * When setting block partition, one should be careful with the downstream task. Some tasks has randomly initialized classification layers, such as the SuperGLUE where the `task_dict` and `pooler` layers are _randomly initialized_. **In this case, make sure to train these layers first, or set it to be trainable through the whole time.** To set modules to be trainable through the whole training process, one can use `active_modules` argument, e.g., set `active_modules=["model.task_dict.", "model.pooler."]` when create the BlockOptimizer. Note that randomly initialized layers are usually the last layer, so updating these layers will only introduce negligible additional BP time. We thus suggest to always set the last classification layer to be trainable when the memory is permitted, if it is randomly initialized.
@@ -142,7 +140,9 @@ We have tested that block partition by self_attn and mlp modules achieves a MT-b
 ### Partition by Module (Model Parallel)
 We support the model parallel offered by deepspeed ZeRO-3. It partitions the model, gradient, and optimizer states across different GPUs so that one can train large models (e.g., Llama 3-70B) that cannot be fit into a single GPU.  Given $N$ GPUs, the per GPU memory cost can be estimated by $\frac{2M + 16M/D}{N}$ (GB), plus the additional cost for communication buffer and temporary parameter gathering buffer arised during forward/backward. These buffer sizes can be configurated manually and determines the efficieny of the communication system.
 
-To use ZeRO-3, one needs to set `ds_zero3_enabled=True` when initializing the BlockOptimizer. Then, set `block_optimizer.ds_optimizer = ds_optimizer` after calling `deepspeed.initialize`. An example is given below:
+<details><summary>Click to see instructions for model parallelism</summary>
+
+To use ZeRO-3, one needs to set `ds_zero3_enabled=True` when initializing the BlockOptimizer. Then, set `block_optimizer.ds_optimizer = ds_optimizer` after calling `deepspeed.initialize`. 
 
 ```python
 from badam import BlockOptimizer
@@ -173,15 +173,19 @@ trainer = YourTrainerClass(
     callbacks=callbacks
 )
 ```
-
 The model parallelism results in noticable overhead due to the communication cost. In particular, we empirically observe about 3 times overhead when training Llama 3-8B with 4 RTX3090 GPUs (without NVLink) using ZeRO-3, in comparison to using a single GPU, under the same `per_device_batch_size`. Fortunately, one may use a larger `per_device_batch_size` to accelerate the training speed as ZeRO-3 greatly reduces the per GPU memory cost.
 
 Make sure to use `accelerate config` to configurate the distributed training and then use proper command to launch your script in a distributed way, such as `accelerate launch` and `deepspeed`.
+
+</details>
+
 
 
 ### Partition by Parameter Ratio
 Instead of partitioning block by the model's parameter, an alternative choice is to train all the parameters simultaneously with a fixed ratio. For instance, we can train 5% parameters of every transformer layer. Namely, each active block contains 5% parameters from every transformer layer. In this sense, the feature extractor of every layer are jointly trained, which may be preferred in certain scenarios. However, training a block consisting of parameters coming from all the transformer layers may lose partly the benefit of BP time saving of **BAdam**.
 
+
+<details><summary>Click to see example code</summary>
 To do this, one can use the `BlockOptimizerRatio`:
 
 ```python
@@ -199,6 +203,7 @@ optimizer = BlockOptimizerRatio(
 )
 ```
 Currently, the `BlockOptimizerRatio` only supports the `Adam` update. The repository is still under active development.
+</details>
 
 **Notes:**
 * The `mask_mode` indicates how should the trainable parameter distribute across a parameter. `mask_mode=adjacent` indicates that the trainable parameters are adjacent to each other, while `mask_mode=scatter` indicates that trainable parameters are randomly choosed from the weight. For instance, considering optimizing a $10 \times 10$ matrix with `update_ratio=0.1`, setting `mask_mode=adjacent` will let parameters of the same row be the same block, and `mask_mode=scatter` means randomly choose 10 trainable parameters from the matrix.
@@ -213,8 +218,11 @@ Currently, the `BlockOptimizerRatio` only supports the `Adam` update. The reposi
 
 ## Run Paper Experiment
 
-### Llama 3-8B and Llama 2-7B on Alpaca-GPT4
-Our implementation of finetuning Llama 3 and Llama 2 is based on [Llama Factory](https://github.com/hiyouga/LLaMA-Factory). This repository mainly serves as the purpose for reproducing our paper's results. For better support on advanced algorithmic features, we suggest to use the latest version of Llama Factory. For the experiment of finetuning Llama-2 7b on [Alpaca-GPT4](https://arxiv.org/abs/2304.03277) dataset, change the working directory to `llama`:
+<details><summary>Llama 3-8B and Llama 2-7B on Alpaca-GPT4</summary>
+
+Our implementation of finetuning Llama 3 and Llama 2 is based on [Llama Factory](https://github.com/hiyouga/LLaMA-Factory). This repository mainly serves as the purpose for reproducing our paper's results. For better support on advanced algorithmic features, we suggest to use the latest version of Llama Factory. 
+
+For the experiment of finetuning Llama-2 7b on [Alpaca-GPT4](https://arxiv.org/abs/2304.03277) dataset, change the working directory to `llama`:
 ```bash
 cd llama-alpaca
 ```
@@ -253,8 +261,10 @@ To finetune Llama 3-8B, one can set `--model_name_or_path meta-llama/Meta-Llama-
 * `--switch_mode`: How to order the block update. Options: (random, ascending, descending).
 * `--switch_block_every`: Switch block frequency; see "Hyperparameter Suggestion" for how to set this hyperparamter.
 * The above sample command is different from the hyperparameters settings in paper, while this version is more efficient. We will update our paper later. 
+</details>
 
-### RoBERTa-large on SuperGLUE
+<details><summary>RoBERTa-large on SuperGLUE</summary>
+
 Our implementation for finetuning RoBERTa-large on [superGLUE](https://arxiv.org/abs/1905.00537) is based on [jiant](https://github.com/nyu-mll/jiant). To run the code, go to directory `roberta-superglue` first:
 ```bash
 cd roberta-superglue
@@ -286,3 +296,4 @@ CUDA_VISIBLE_DEVICES=0 python badam_ft.py \
 * `--task_name`: Options: boolq, wic, wsc, rte, multirc, copa
 * `--use_block_optim`: Whether to use BlockOptimizer or not. Remove this argument leads to full parameter Adam update. Change to `--use_sparse_optim`: to use BlockOptimizerRatio.
 * `--train_last_layer`: Whether to train the last layer through the finetuning. For the superGLUE task, the last layer is randomly initialized and thereby needs to be trained first or being trainable through the whole training.
+</details>
