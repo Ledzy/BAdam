@@ -128,27 +128,23 @@ optimizer = BlockOptimizer(
     ds_zero3_enabled=True # set it to True
 )
 
-model, ds_optimizer = deepspeed.initialize(model=model, optimizer=optimizer, ...other arguments)
+model, ds_optimizer = deepspeed.initialize(model=model, optimizer=optimizer, ...)
 
 # create the reference to the ds_optimizer, for the purpose of setup ZeRO-3's environment
 optimizer.ds_optimizer = ds_optimizer
 ```
 See `sample_ds_zero3.json` for a sample deepspeed configuration file.
 
-When using huggingface Trainer, one can create the reference to the ds_optimizer by inheriting the Trainer class and rewrite its `training_step` function:
+To create the reference to the ds_optimizer when using huggingface Trainer, one can add the BAdamZeRO3Callback when initializing the Trainer:
+
 ```python
-def training_step(self, *args, **kwargs):
-    """ Update the reference to deepspeed optimizer """
-    # Replace `self.finetuning_args.use_badam` with your flag variable.
-    if self.finetuning_args.use_badam and \
-        self.args.deepspeed_plugin is not None and \
-        self.args.deepspeed_plugin.zero_stage == 3:
-        
-        ds_optim = self.optimizer.optimizer
-        badam_optim = ds_optim.optimizer
-        badam_optim.ds_optimizer = ds_optim
-    
-    return super().training_step(*args, **kwargs)
+from badam.utils import BAdamZeRO3Callback
+
+callbacks = original_callbacks.append(BAdamZeRO3Callback) # extend the callback
+trainer = YourTrainerClass(
+    ...
+    callbacks=callbacks
+)
 ```
 
 The model parallelism results in noticable overhead due to the communication cost. In particular, we empirically observe about 3 times overhead when training Llama 3-8B with 4 RTX-3090 GPUs (without NVLink) using ZeRO-3, in comparison with using single GPU, under the same `per_device_batch_size`. One may use larger batch size to accelerate the training process as ZeRO-3 greatly reduces the per GPU memory cost.
