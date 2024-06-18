@@ -1,6 +1,6 @@
 # BAdam
 
-The implementation for [BAdam: A Memory Efficient Full Parameter Training Method for Large Language Models](https://arxiv.org/abs/2404.02827). This paper presents an algorithm named **BAdam**, which finetunes Llama 2-7b and Llama 3-8B using **a single RTX3090** with Adam's update rule and mixed precision training. The core idea of **BAdam** is to sequentially solve block coordinate optimization sub-problems. From the implementation perspective, the algorithm runs Adam's update on a small portition (usually one single transformer layer) of the parameters, thereby requires much less memory in comparison to full parameter Adam finetuning. **Using BAdam only requires one line modification of the original code.**
+The implementation for [BAdam: A Memory Efficient Full Parameter Optimization Method for Large Language Models](https://arxiv.org/abs/2404.02827). This paper presents an algorithm named **BAdam**, which finetunes Llama 2-7b and Llama 3-8B using **a single RTX3090** with Adam's update rule and mixed precision training. The core idea of **BAdam** is to sequentially solve block coordinate optimization sub-problems. From the implementation perspective, the algorithm runs Adam's update on a small portition (usually one single transformer layer) of the parameters, thereby requires much less memory in comparison to full parameter Adam finetuning. **Using BAdam only requires one line modification of the original code.**
 
 | Method | Minimum Memory | Actual Memory Cost (Llama 3-8B) | Actual Memory Cost (Llama 2-7B) |
 | -------- | -------- | -------- | -------- |
@@ -29,8 +29,8 @@ One can also apply **BAdam** for larger models with size such as 13B, 22B, 30B, 
 ## Table of Contents
 - [Environment Setup](#setup)
 - [Usage of BAdam](#usage-of-badam)
-    - [Partition by Module (single GPU)](#partition-by-module-single-gpu)
-    - [Partition by Module (Model parallel)](#partition-by-module-model-parallel)
+    - [Partition by Module (A Single GPU)](#partition-by-module-a-single-gpu)
+    - [Partition by Module (Model Parallel)](#partition-by-module-model-parallel)
     - [Partition by Parameter Ratio](#partition-by-parameter-ratio)
     - [Hyperparameter Suggestion](#hyperparameter-suggestion)
 - [Run Paper Experiment](#run-paper-experiment)
@@ -59,7 +59,7 @@ pip install -r requirements.txt
 
 ## Usage of BAdam
 
-### Partition by Module (Single GPU)
+### Partition by Module (A Single GPU)
 **BAdam** uses mixed-precision training, make sure that the model is loaded in `float16` precision for memory saving. To use **BAdam**, one can simply add **one line of code** that wraps the original optimizer.
 
 ```python
@@ -74,7 +74,7 @@ optimizer = BlockOptimizer(
     verbose=2 # information level, will print trainable parameters when setting to 2
 )
 ```
-The above code automatically creates the block list according to `model.named_parameters`. Specifically, it treates each transformer layer as a single block. For instance, for the Llama 2-7B, the block partition ($D = 32$) will be
+The above code automatically creates a block partition according to `model.named_parameters`. Specifically, it treates each transformer layer module as a single block. For instance, for Llama 3-8B, the block partition ($D = 32$) will be
 ```
 block 1: model.layers.0.
 block 2: model.layers.1.
@@ -82,9 +82,33 @@ block 2: model.layers.1.
 block 32: model.layers.31.
 ```
 
-**By default, the embedding layer and language modeling head is not included in the training blocks**. One can add them as two additional blocks by setting `include_embedding=True`, `include_lm_head=True`. One can also specify their own block list for the block optimizer. This can be achieved by adjusting the`block_prefix_list` argument. For instance, the following code snippet divide each layer into blocks, which helps further reduce the memory cost:
+**By default, the embedding layer and language modeling head is not included in the training blocks**. One can add them as two additional blocks by setting `include_embedding=True`, `include_lm_head=True`. 
+
+One can also specify their own block list for the block optimizer. This can be achieved by adjusting the`block_prefix_list` argument. For instance, the following code snippets creat block partitions by self_attn and mlp modules (i.e., $D=32\times 2 = 64$ for Llama 3-8B) and matrix modules (i.e., $D = 32\times 7=224$ for Llama 3-8B), respectively, which helps further reduce the memory cost:
+
 
 ```python
+#block partition by self_attn and mlp modules
+block_prefix_list = []
+for i in range(32):
+    layer_prefix = [
+        [f"model.layers.{i}.self_attn."],
+        [f"model.layers.{i}.mlp."],
+    ]
+    block_prefix_list.extend(layer_prefix)
+
+optimizer = BlockOptimizer(
+    base_optimizer=original_optimizer,
+    named_parameters_list=list(model.named_parameters_list), 
+    switch_block_every=100,
+    switch_mode="random",
+    verbose=2,
+    block_prefix_list=block_prefix_list # set the block list
+)
+```
+
+```python
+#block partition by matrix modules
 block_prefix_list = []
 for i in range(32):
     layer_prefix = [
@@ -107,13 +131,16 @@ optimizer = BlockOptimizer(
     block_prefix_list=block_prefix_list # set the block list
 )
 ```
+
+We have tested that block partition by self_attn and mlp modules achieves a MT-bench score 6.65 for finetuning Llama 3-8B. This score matches that (6.67) achieved by block partition by transformer layer modules, while further reduces the memory cost. 
+
 **Important Notes:**
 * When setting block partition, one should be careful with the downstream task. Some tasks has randomly initialized classification layers, such as the SuperGLUE where the `task_dict` and `pooler` layers are _randomly initialized_. **In this case, make sure to train these layers first, or set it to be trainable through the whole time.** To set modules to be trainable through the whole training process, one can use `active_modules` argument, e.g., set `active_modules=["model.task_dict.", "model.pooler."]` when create the BlockOptimizer. Note that randomly initialized layers are usually the last layer, so updating these layers will only introduce negligible additional BP time. We thus suggest to always set the last classification layer to be trainable when the memory is permitted, if it is randomly initialized.
 * The parameters that are not included in `block_prefix_list` will be inactive (freezed) through the whole training procedure.
 * When setting prefix, it is suggested to include a `.` at the end. For example, it is preferred to use `model.layers.1.` instead of `model.layers.1`, as the later one includes the layer 10, 11, ..., 19 as well (since they have the same prefix).
 
-### Partition by Module (Model parallel)
-We support the model parallel offered by deepspeed ZeRO-3. It partitions the model, gradient, and optimizer states across different GPUs so that one can train large models that cannot be fit into a single GPU.  The per GPU memory cost can be estimated by $\frac{2M + 16M/D}{N}$ (GB), plus the additional cost for communication buffer and temporary parameter gathering buffer arised during forward/backward. These buffer sizes can be configurated manually and determines the efficieny of the communication system.
+### Partition by Module (Model Parallel)
+We support the model parallel offered by deepspeed ZeRO-3. It partitions the model, gradient, and optimizer states across different GPUs so that one can train large models (e.g., Llama 3-70B) that cannot be fit into a single GPU.  Given $N$ GPUs, the per GPU memory cost can be estimated by $\frac{2M + 16M/D}{N}$ (GB), plus the additional cost for communication buffer and temporary parameter gathering buffer arised during forward/backward. These buffer sizes can be configurated manually and determines the efficieny of the communication system.
 
 To use ZeRO-3, one needs to set `ds_zero3_enabled=True` when initializing the BlockOptimizer. Then, set `block_optimizer.ds_optimizer = ds_optimizer` after calling `deepspeed.initialize`. An example is given below:
 
@@ -147,7 +174,7 @@ trainer = YourTrainerClass(
 )
 ```
 
-The model parallelism results in noticable overhead due to the communication cost. In particular, we empirically observe about 3 times overhead when training Llama 3-8B with 4 RTX-3090 GPUs (without NVLink) using ZeRO-3, in comparison with using single GPU, under the same `per_device_batch_size`. One may use larger batch size to accelerate the training process as ZeRO-3 greatly reduces the per GPU memory cost.
+The model parallelism results in noticable overhead due to the communication cost. In particular, we empirically observe about 3 times overhead when training Llama 3-8B with 4 RTX3090 GPUs (without NVLink) using ZeRO-3, in comparison to using a single GPU, under the same `per_device_batch_size`. Fortunately, one may use a larger `per_device_batch_size` to accelerate the training speed as ZeRO-3 greatly reduces the per GPU memory cost.
 
 Make sure to use `accelerate config` to configurate the distributed training and then use proper command to launch your script in a distributed way, such as `accelerate launch` and `deepspeed`.
 
@@ -181,7 +208,7 @@ Currently, the `BlockOptimizerRatio` only supports the `Adam` update. The reposi
 * Currently, the operation of sparsifing the gradient causes noticable overhead, which inevitably slow down the training. We leave the acceleration as a future work.
 
 ### Hyperparameter Suggestion
-* Choice of the `switch_block_every`. Compared to Adam, our BAdam only introduces _one_ additional hyperparameter, i.e., the `switch_block_every` (the `K` Adam steps in paper). It determines how many Adam steps we perform for each active block before switching to the next one. Fortunately, this hyperparameter can be set **adaptively**. Ideally, we expect to balance the data usage for each block in every epoch. This gives a natural choice of `switch_block_every` = $\frac{n}{BD}$ (rounding to the nearest integer if it is a fractional), where $n$ is the number of training data points, $B$ is the effective batch size, and $D$ is the number of blocks in BAdam. Using such a setting ensures that after one block-epoch, all the training data points are equally distributed to the $D$ blocks for training. Meanwhile, to achieve sufficient decrease for each block coordinate optimization subproblem and fully utilize the advantage of mixed precision training for reducing rounding error, the switch frequency should not be too small. **We notice that set** `switch_block_every`  = $\max(\frac{n}{BD}, 50)$ **usually yields fast convergence speed on both training loss and validation loss.**
+* Choice of the `switch_block_every`. Compared to Adam, our BAdam only introduces _one_ additional hyperparameter, i.e., the `switch_block_every` (the `K` Adam steps in paper). It determines how many Adam steps we perform for each active block before switching to the next one. Fortunately, this hyperparameter can be set adaptively. Ideally, we expect to balance the data usage for each block in every epoch. This gives a natural choice of `switch_block_every` = $\frac{n}{BD}$ (rounding to the nearest integer if it is a fractional), where $n$ is the number of training data points, $B$ is the effective batch size, and $D$ is the number of blocks in BAdam. Using such a setting ensures that after one block-epoch, all the training data points are equally distributed to the $D$ blocks for training. Meanwhile, to achieve sufficient decrease for each block coordinate descent subproblem and fully utilize the advantage of mixed precision training for reducing rounding error, the switch frequency should not be too small. Additionally, too large switch frequency may over-optimize one block before moving to others. **We notice that setting** `switch_block_every`  = $\min(\max(\frac{n}{BD}, 50),100)$ **usually yields fast convergence speed on both training loss and validation loss.**
 
 
 ## Run Paper Experiment
@@ -218,7 +245,7 @@ CUDA_VISIBLE_DEVICES=0 python src/train_bash.py \
     --switch_block_every 100 \
     --switch_mode random
 ```
-To finetune Llama 3-8B, one can set `--model_name_or_path meta-llama/Meta-Llama-3-8B`. We use learning rate `1e-6` for Llama 3-8B and learning rate 1e-5 for Llama 2-7B, respectively. 
+To finetune Llama 3-8B, one can set `--model_name_or_path meta-llama/Meta-Llama-3-8B`. We use learning rate `1e-6` for Llama 3-8B and learning rate 1e-5 for Llama 2-7B, respectively. It is important to note that the favorable learning rate may vary for different models and datasets. 
 
 **Notes on arguments:**
 * `--stage`: Currently we only implement the `sft`.
