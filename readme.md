@@ -185,8 +185,7 @@ Make sure to use `accelerate config` to configurate the distributed training and
 Instead of partitioning block by the model's parameter, an alternative choice is to train all the parameters simultaneously with a fixed ratio. For instance, we can train 5% parameters of every transformer layer. Namely, each active block contains 5% parameters from every transformer layer. In this sense, the feature extractor of every layer are jointly trained, which may be preferred in certain scenarios. However, training a block consisting of parameters coming from all the transformer layers may lose partly the benefit of BP time saving of **BAdam**.
 
 
-<details><summary>Click to see example code</summary>
-To do this, one can use the `BlockOptimizerRatio`:
+<details><summary>Click to see example code and instructions</summary>
 
 ```python
 from badam import BlockOptimizerRatio
@@ -203,7 +202,6 @@ optimizer = BlockOptimizerRatio(
 )
 ```
 Currently, the `BlockOptimizerRatio` only supports the `Adam` update. The repository is still under active development.
-</details>
 
 **Notes:**
 * The `mask_mode` indicates how should the trainable parameter distribute across a parameter. `mask_mode=adjacent` indicates that the trainable parameters are adjacent to each other, while `mask_mode=scatter` indicates that trainable parameters are randomly choosed from the weight. For instance, considering optimizing a $10 \times 10$ matrix with `update_ratio=0.1`, setting `mask_mode=adjacent` will let parameters of the same row be the same block, and `mask_mode=scatter` means randomly choose 10 trainable parameters from the matrix.
@@ -211,6 +209,7 @@ Currently, the `BlockOptimizerRatio` only supports the `Adam` update. The reposi
 * For `BlockOptimizerRatio`, we notice that setting `mask_mode = "adjacent"` usually performs the best; we leave the study of `mask_mode` as a future work. The convergence speed is highly positively related to the `update_ratio`, so we suggest to choose it as high as possible when the memory is permitted. 
 * The gradient and optimizer states are stored in sparse tensor format. The update rule is exactly the same as the  `BlockOptimizer`: run Adam update on current active block for `switch_every` steps, and then switch to next block.
 * Currently, the operation of sparsifing the gradient causes noticable overhead, which inevitably slow down the training. We leave the acceleration as a future work.
+</details>
 
 ### Hyperparameter Suggestion
 * Choice of the `switch_block_every`. Compared to Adam, our BAdam only introduces _one_ additional hyperparameter, i.e., the `switch_block_every` (the `K` Adam steps in paper). It determines how many Adam steps we perform for each active block before switching to the next one. Fortunately, this hyperparameter can be set adaptively. Ideally, we expect to balance the data usage for each block in every epoch. This gives a natural choice of `switch_block_every` = $\frac{n}{BD}$ (rounding to the nearest integer if it is a fractional), where $n$ is the number of training data points, $B$ is the effective batch size, and $D$ is the number of blocks in BAdam. Using such a setting ensures that after one block-epoch, all the training data points are equally distributed to the $D$ blocks for training. Meanwhile, to achieve sufficient decrease for each block coordinate descent subproblem and fully utilize the advantage of mixed precision training for reducing rounding error, the switch frequency should not be too small. Additionally, too large switch frequency may over-optimize one block before moving to others. **We notice that setting** `switch_block_every`  = $\min(\max(\frac{n}{BD}, 50),100)$ **usually yields fast convergence speed on both training loss and validation loss.**
