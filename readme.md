@@ -83,10 +83,10 @@ block 32: model.layers.31.
 
 <details><summary>Click to see more partition strategies and example code</summary>
 
-One can also specify their own block list for the block optimizer. This can be achieved by adjusting the`block_prefix_list` argument. For instance, the following code snippets creat block partitions by self_attn and mlp modules (i.e., $D=32\times 2 = 64$ for Llama 3-8B) and matrix modules (i.e., $D = 32\times 7=224$ for Llama 3-8B), respectively, which helps further reduce the memory cost:
+One can also specify their own block list for the block optimizer. This can be achieved by adjusting the `block_prefix_list` argument. For instance, the following code snippets creat block partitions by self_attn and mlp modules (i.e., D = 32 * 2 = 64 for Llama 3-8B), and matrix modules (i.e., D = 32 * 7=224 for Llama 3-8B), respectively, which helps further reduce the memory cost:
 
 ```python
-#block partition by self_attn and mlp modules
+# block partition by self_attn and mlp modules
 block_prefix_list = []
 for i in range(32):
     layer_prefix = [
