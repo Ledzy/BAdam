@@ -159,12 +159,12 @@ model, ds_optimizer = deepspeed.initialize(model=model, optimizer=optimizer, ...
 optimizer.ds_optimizer = ds_optimizer
 ```
 
-When using huggingface Trainer to control the workflow, accessing ds_optimizer is not direct. One can add the BAdamZeRO3Callback to create the reference to ds_optimizer:
+When using huggingface Trainer to control the workflow, accessing ds_optimizer is not direct. One can add the BAdamCallback which automatically handles the reference to ds_optimizer:
 
 ```python
-from badam.utils import BAdamZeRO3Callback
+from badam.utils import BAdamCallback
 
-callbacks = original_callbacks.append(BAdamZeRO3Callback) # add the callback
+callbacks = original_callbacks.append(BAdamCallback) # add the callback
 trainer = YourTrainerClass(
     ...,
     callbacks=callbacks
