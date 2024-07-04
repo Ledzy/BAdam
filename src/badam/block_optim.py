@@ -13,6 +13,7 @@ from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
 from deepspeed.runtime.zero.utils import apply_to_tensors_only
 from deepspeed.utils import z3_leaf_parameter
 from deepspeed.utils import logger
+from transformers.integrations import is_deepspeed_zero3_enabled
 import logging
 
 logger.setLevel(logging.WARNING) # surpress the tedious info log from deepspeed when switching trainable blocks
@@ -38,7 +39,7 @@ class BlockOptimizer(Optimizer):
         base_optimizer: Optimizer,
         named_parameters_list,
         block_prefix_list: List[str] = None,
-        switch_block_every: int = 10,
+        switch_block_every: int = 50,
         start_block: Optional[int] = None,
         switch_mode: str = "descending",
         active_modules: List[str] = [],
@@ -46,7 +47,6 @@ class BlockOptimizer(Optimizer):
         include_lm_head=False,
         verbose: int = 1,
         log_fn = None,
-        ds_zero3_enabled = False
     ):
         """
         Args:
@@ -79,7 +79,7 @@ class BlockOptimizer(Optimizer):
         self.base_optimizer = base_optimizer
         self.active_modules = active_modules
         self.defaults = base_optimizer.defaults
-        self.ds_zero3_enabled = ds_zero3_enabled
+        self.ds_zero3_enabled = is_deepspeed_zero3_enabled()
 
         self.param_groups = base_optimizer.param_groups
         self.state_dict = base_optimizer.state_dict # for compatibility of hf Trainer
@@ -101,9 +101,14 @@ class BlockOptimizer(Optimizer):
             self.lora_mode = True
             print_rank_0("LoRA mode detected. Will only train the lora parameters.")
             
-        if any(isinstance(p, torch.FloatTensor) for _, p in named_parameters_list):
-            warnings.warn("BAdam expect model to be loaded in fp16 precision while detect fp32 weight. \
-                This will cause additional memory usage and lose the benefit of mixed precision training.")
+        fp32_params = []
+        for n, p in named_parameters_list:
+            if p.dtype == torch.float32:
+                fp32_params.append(n)
+        if len(fp32_params) > 0:
+            warnings.warn(f"BAdam expect model to be loaded in fp16/bf16 precision, while detect fp32"
+                f"weight for the following parameters: {fp32_params} \n"
+                "This will cause additional memory usage and lose the benefit of mixed precision training.")
             
         super().__init__(self.param_groups, base_optimizer.defaults)
         
