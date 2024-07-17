@@ -13,17 +13,17 @@ class BAdamCallback(TrainerCallback):
     def __init__(self, *args, **kwargs):
         self.init_loss_scale = kwargs.get("init_loss_scale", 12)
         
-    def on_init_end(self, *args, **kwargs):
+        
+    def on_train_begin(self, *args, **kwargs):
         model = kwargs["model"]
 
-        if hasattr(model, "disable_input_require_grads"):
+        if hasattr(model, "disable_input_require_grads") and hasattr(model, "_require_grads_hook"):
             model.disable_input_require_grads()
             logger.info("Disable embedding output's require_grads for block-wise optimizer. Instead, "
                         "set input of checkpoint layer's `requires_grad` to True when the checkpoint layer is trainable")
 
-        model.gradient_checkpointing_enable = MethodType(gradient_checkpointing_enable_for_bcd, self.model)
-        
-    def on_train_begin(self, *args, **kwargs):
+        model.gradient_checkpointing_enable = MethodType(gradient_checkpointing_enable_for_bcd, model)
+
         if is_deepspeed_zero3_enabled():
             optimizer = kwargs["optimizer"] # DeepSpeedOptimizerWrapper
             

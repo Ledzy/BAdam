@@ -47,6 +47,7 @@ class BlockOptimizer(Optimizer):
         include_lm_head=False,
         verbose: int = 1,
         log_fn = None,
+        ds_zero3_enabled = None
     ):
         """
         Args:
@@ -66,6 +67,8 @@ class BlockOptimizer(Optimizer):
 
         assert switch_mode in ["random", "descending", "ascending", "fixed"]
         assert isinstance(block_prefix_list, list)
+        if ds_zero3_enabled is not None:
+            logger.warning("ds_zero3_enabled is deprecated and is not used anymore. BAdam will automatically detects if DeepSpeed ZeRO-3 is enabled.")
 
         self.verbose = verbose
         self.switch_mode = switch_mode
