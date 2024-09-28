@@ -20,6 +20,8 @@ The implementation for [BAdam: A Memory Efficient Full Parameter Optimization Me
 One can also apply **BAdam** for larger models with size such as 13B, 22B, 30B, and 70B. The memory consumption can be estimated to be $2M + \frac{16M}{D}$ (GB), plus some additional memory consumption for gradient checkpointed activations and system use like PyTorch's pre-allocation, etc (minor part). When using model parallelism with $N$ GPUs, the memory cost can be estimated by $\frac{2M + 16M/D}{N}$ (GB), plus the additional communication buffers.
 
 ## Change log
+[24/09/26] **BAdam** has been accepted by NeurIPS, 2024!
+
 [24/06/16] We support model parallel using Deepspeed ZeRO-3 now!
 
 [24/04/16] Our algorithm has been added to [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory). We would like to express our gratitude to their efforts on integrating **BAdam**!
