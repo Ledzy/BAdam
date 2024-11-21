@@ -99,7 +99,7 @@ for i in range(32):
 
 optimizer = BlockOptimizer(
     base_optimizer=original_optimizer,
-    named_parameters_list=list(model.named_parameters_list), 
+    named_parameters_list=list(model.named_parameters()), 
     switch_block_every=100,
     switch_mode="random",
     verbose=2,
@@ -233,7 +233,7 @@ CUDA_VISIBLE_DEVICES=0 python src/train_bash.py \
     --dataset alpaca_gpt4_en \
     --template default \
     --finetuning_type block \
-    --output_dir ./outputs/llama2-7b \
+    --output_dir ./outputs/llama2-7b-hf \
     --overwrite_cache \
     --per_device_train_batch_size 2 \
     --per_device_eval_batch_size 2 \
