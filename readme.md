@@ -12,7 +12,7 @@ The implementation for [BAdam: A Memory Efficient Full Parameter Optimization Me
 | Method | Llama 3-8b | Llama 2-7b |
 | -------- | -------- | -------- | 
 | Pretrained model | 5.46 | 3.93 |
-| LoRA | 6.41   | 5.05 | 
+| LoRA | 6.36   | 4.86 | 
 |  **BAdam**  | **6.67** | **5.21** |
 <!-- | LoRA    | Data     | Data     | -->
 **Table 2: MT bench score.** The model is instruction finetuned on Alpaca-GPT4 dataset using a single RTX3090. **BAdam** consistently outperforms LoRA in MT bench under various evaluation models.
