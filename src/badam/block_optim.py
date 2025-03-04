@@ -10,11 +10,14 @@ import warnings
 import gc
 import re
 from transformers.pytorch_utils import ALL_LAYERNORM_LAYERS
-from deepspeed.runtime.zero.utils import apply_to_tensors_only
-from deepspeed.utils import z3_leaf_parameter
-from deepspeed.utils import logger
 from transformers.integrations import is_deepspeed_zero3_enabled
 import logging
+
+if is_deepspeed_zero3_enabled():
+    from deepspeed.runtime.zero.utils import apply_to_tensors_only
+    from deepspeed.utils import z3_leaf_parameter
+    from deepspeed.utils import logger
+
 
 logger.setLevel(logging.WARNING) # surpress the tedious info log from deepspeed when switching trainable blocks
 
