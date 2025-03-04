@@ -303,7 +303,7 @@ class BlockOptimizer(Optimizer):
         ds_optimizer._setup_for_real_optimizer()
         
         # invalidate the trace cache, since the module processing order has been changed
-        ds_optimizer.parameter_offload.get_param_coordinator(training=True)._invalidate_trace()
+        ds_optimizer.parameter_offload.get_param_coordinator()._invalidate_trace()
         
         torch.cuda.empty_cache()
 
