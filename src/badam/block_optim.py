@@ -17,9 +17,11 @@ if is_deepspeed_zero3_enabled():
     from deepspeed.runtime.zero.utils import apply_to_tensors_only
     from deepspeed.utils import z3_leaf_parameter
     from deepspeed.utils import logger
+    logger.setLevel(logging.WARNING) # surpress the tedious info log from deepspeed when switching trainable blocks
 
-
-logger.setLevel(logging.WARNING) # surpress the tedious info log from deepspeed when switching trainable blocks
+else:
+    import logging
+    logger = logging.getLogger(__name__)
 
 # Optional [0, 1, 2]. 
     # 0: no print
